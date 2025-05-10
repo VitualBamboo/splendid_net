@@ -6,33 +6,13 @@
 
 #define min(a, b)               ((a) > (b) ? (b) : (a))
 
-/*
-* 2个字节，16位
-* 翻转高8位和低8位
-*/
-#define swap_order16(v)   ((((v) & 0xFF) << 8) | (((v) >> 8) & 0xFF))
+static const xipaddr_t netif_ipaddr = XNET_CFG_NETIF_IP;                        // 协议栈的IP地址
+static const uint8_t ether_broadcast[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};  // 广播mac地址
+static uint8_t netif_mac[XNET_MAC_ADDR_SIZE];                                   // 协议栈mac地址
+static xnet_packet_t tx_packet, rx_packet;                                      // 接收与发送缓冲区
+static xarp_entry_t arp_entry;                                                  // ARP表项
 
-/**
- * mac地址
- */
-static uint8_t netif_mac[XNET_MAC_ADDR_SIZE];
-
-/**
- * ARP表
- */
-static xarp_entry_t arp_entry;
-
-/**
- * 发送缓冲区
- * transmit packet
- */
-static xnet_packet_t tx_packet;
-
-/**
- * 接收缓冲区
- * receive packet
- */
-static xnet_packet_t rx_packet;
+#define swap_order16(v)   ((((v) & 0xFF) << 8) | (((v) >> 8) & 0xFF)) // 大小端转换
 
 /**
  * 为发包添加一个头部
@@ -90,17 +70,6 @@ xnet_packet_t *xnet_alloc_for_read(uint16_t size) {
 }
 
 /**
- * 以太网初始化
- * @return 初始化结果
- */
-static xnet_err_t ethernet_init(void) {
-    xnet_err_t err = xnet_driver_open(netif_mac);
-    if (err < 0) return err;
-
-    return XNET_ERR_OK;
-}
-
-/**
  * 发送一个以太网数据帧
  * @param protocol 上层数据协议，IP或ARP
  * @param mac_addr 目标网卡的mac地址
@@ -120,6 +89,43 @@ static xnet_err_t ethernet_out_to(xnet_protocol_t protocol, const uint8_t *mac_a
 
     // 数据发送
     return xnet_driver_send(packet);
+}
+
+/**
+ * 产生一个ARP请求，请求网络指定ip地址的机器发回一个ARP响应
+ * @param target_ipaddr 请求的IP地址
+ * @return 请求结果
+ */
+static xnet_err_t xarp_make_request(const xipaddr_t* target_ipaddr) {
+    // 新建 arp_packet 和 packet
+    xarp_packet_t* arp_packet;
+    xnet_packet_t* xnet_packet = xnet_alloc_for_send(sizeof(xarp_packet_t));
+
+    // 让 arp_packet 指向 data 首地址，配置载荷
+    arp_packet = (xarp_packet_t*) xnet_packet->data;
+    arp_packet->hw_type = swap_order16(XARP_HW_ETHER);
+    arp_packet->protocol_type = swap_order16(XNET_PROTOCOL_IP);
+    arp_packet->hw_len = XNET_MAC_ADDR_SIZE;
+    arp_packet->protocol_len = XNET_IPV4_ADDR_SIZE;
+    arp_packet->opcode = swap_order16(XARP_REQUEST);
+    memcpy(arp_packet->sender_mac, netif_mac, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->sender_ip, netif_ipaddr.addr_bytes, XNET_IPV4_ADDR_SIZE);
+    memset(arp_packet->target_mac, 0, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->target_ip, target_ipaddr->addr_bytes, XNET_IPV4_ADDR_SIZE);
+
+    // 发送以太网请求
+    return ethernet_out_to(XNET_PROTOCOL_ARP, ether_broadcast, xnet_packet);
+}
+
+/**
+ * 以太网初始化，此时会写入协议栈 mac 地址
+ * @return 初始化结果
+ */
+static xnet_err_t ethernet_init(void) {
+    xnet_err_t err = xnet_driver_open(netif_mac);
+    if (err < 0) return err;
+    // 全网广播自己的 mac 地址，target ip设置自己
+    return xarp_make_request(&netif_ipaddr);
 }
 
 /**

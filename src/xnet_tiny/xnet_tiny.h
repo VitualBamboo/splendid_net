@@ -6,12 +6,8 @@
 
 #include <stdint.h>
 
-/**
- * 收发数据包的最大大小
- * 以太网 6 + 6 + 2
- * 数据 1500
- */
-#define XNET_CFG_PACKET_MAX_SIZE        1514
+#define XNET_CFG_PACKET_MAX_SIZE        1514                // 收发数据包的最大大小
+#define XNET_CFG_NETIF_IP               {192, 168, 254, 2}  // 协议栈的IP地址
 
 // 以太网包头，使用指针偏移的方式读取，故关闭填充字节
 #pragma pack(1)
@@ -35,6 +31,23 @@ typedef struct _xether_hdr_t {
     uint8_t src[XNET_MAC_ADDR_SIZE]; // 源mac地址，6字节
     uint16_t protocol; // 协议/长度，2字节
 } xether_hdr_t;
+
+#define XARP_HW_ETHER               0x1         // 以太网
+#define XARP_REQUEST                0x1         // ARP请求包
+#define XARP_REPLY                  0x2         // ARP响应包
+
+/**
+ * ARP 包
+ */
+typedef struct _xarp_packet_t {
+    uint16_t hw_type, protocol_type;            // 硬件类型和协议类型
+    uint8_t hw_len, protocol_len;               // 硬件地址长 + 协议地址长
+    uint16_t opcode;                            // 请求/响应
+    uint8_t sender_mac[XNET_MAC_ADDR_SIZE];     // 发送包硬件地址
+    uint8_t sender_ip[XNET_IPV4_ADDR_SIZE];     // 发送包协议地址
+    uint8_t target_mac[XNET_MAC_ADDR_SIZE];     // 接收方硬件地址
+    uint8_t target_ip[XNET_IPV4_ADDR_SIZE];     // 接收方协议地址
+}xarp_packet_t;
 
 #pragma pack()
 
@@ -99,7 +112,7 @@ typedef enum _xnet_protocol_t {
  * IP地址，使用共用体，节省空间
  */
 typedef union _xipaddr_t {
-    uint8_t array[XNET_IPV4_ADDR_SIZE]; // 以数据形式存储的ip
+    uint8_t addr_bytes[XNET_IPV4_ADDR_SIZE]; // 以字节形式存储的ip
     uint32_t addr; // 32位的ip地址
 } xipaddr_t;
 
