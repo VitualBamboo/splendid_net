@@ -71,7 +71,7 @@ xnet_err_t ethernet_out_to(xnet_protocol_t protocol, const uint8_t* mac_addr, xn
 xnet_err_t xarp_make_request(const xipaddr_t *target_ipaddr) {
     // 新建 arp_packet 和 packet
     xarp_packet_t* arp_packet;
-    xnet_packet_t* xnet_packet = xnet_alloc_for_send(sizeof(xarp_packet_t));
+    xnet_packet_t* xnet_packet = prepare_packet_for_send(sizeof(xarp_packet_t));
 
     // 让 arp_packet 指向 data 首地址，配置载荷
     arp_packet = (xarp_packet_t*) xnet_packet->data_start;
@@ -109,7 +109,7 @@ xnet_err_t ethernet_init(void) {
  */
 xnet_err_t xarp_make_response(uint8_t* target_ip, uint8_t* target_mac) {
     xarp_packet_t* arp_packet;
-    xnet_packet_t* packet = xnet_alloc_for_send(sizeof(xarp_packet_t));
+    xnet_packet_t* packet = prepare_packet_for_send(sizeof(xarp_packet_t));
 
     arp_packet = (xarp_packet_t*) packet->data_start;
     arp_packet->hw_type = swap_order16(XARP_HW_ETHER);
@@ -168,7 +168,7 @@ void xarp_in(xnet_packet_t* packet) {
  * @param packet 待处理的包
  */
 void ethernet_in(xnet_packet_t* packet) {
-    // 至少要比头部数据大
+    // 数据至少要比以太网头部大
     if (packet->data_length <= sizeof(xether_hdr_t)) {
         return;
     }
