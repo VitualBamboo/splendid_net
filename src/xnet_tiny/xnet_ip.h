@@ -8,6 +8,7 @@
 #include "xnet_tiny.h"
 
 #define XNET_VERSION_IPV4                   4   // IPV4
+#define XNET_IP_DEFAULT_TTL                 64  // 缺省的IP包TTL值
 
 #pragma pack(1)
 typedef struct _xip_hdr_t {
@@ -27,5 +28,6 @@ typedef struct _xip_hdr_t {
 
 void xip_init(void);
 void xip_in(xnet_packet_t* packet);
+xnet_err_e xip_out(xnet_protocol_e protocol, xip_addr_u* dest_ip, xnet_packet_t * packet);
 
 #endif //XNET_IP_H

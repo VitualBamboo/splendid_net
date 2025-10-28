@@ -41,7 +41,7 @@ typedef struct _xarp_packet_t {
  * @param packet 待发送的数据包
  * @return 发送结果
  */
-xnet_err_t ethernet_out_to(xnet_protocol_t protocol, const uint8_t* mac_addr, xnet_packet_t* packet) {
+xnet_err_e ethernet_out_to(xnet_protocol_e protocol, const uint8_t* mac_addr, xnet_packet_t* packet) {
     xether_hdr_t* ether_hdr;
 
     // 添加以太网头部，指针前移
@@ -61,7 +61,7 @@ xnet_err_t ethernet_out_to(xnet_protocol_t protocol, const uint8_t* mac_addr, xn
  * @param target_ipaddr 传入目标IP，或者传自己的IP
  * @return 请求结果
  */
-xnet_err_t xarp_make_request(const xip4_addr_t *target_ipaddr) {
+xnet_err_e xarp_make_request(const xip_addr_u *target_ipaddr) {
     // 新建 arp_packet 和 packet
     xarp_packet_t* arp_packet;
     xnet_packet_t* xnet_packet = prepare_packet_for_send(sizeof(xarp_packet_t));
@@ -85,8 +85,8 @@ xnet_err_t xarp_make_request(const xip4_addr_t *target_ipaddr) {
  * 以太网初始化，此时会写入协议栈 mac 地址
  * @return 初始化结果
  */
-xnet_err_t ethernet_init(void) {
-    xnet_err_t err = xnet_driver_open(netif_mac);
+xnet_err_e ethernet_init(void) {
+    xnet_err_e err = xnet_driver_open(netif_mac);
     if (err < 0) return err;
     // 全网广播自己的 mac 地址，target ip设置自己
     return xarp_make_request(&netif_ipaddr);
@@ -99,7 +99,7 @@ xnet_err_t ethernet_init(void) {
  * @param arp_in_packet 接收到的ARP请求包
  * @return 生成结果
  */
-xnet_err_t xarp_make_response(uint8_t* target_ip, uint8_t* target_mac) {
+xnet_err_e xarp_make_response(uint8_t* target_ip, uint8_t* target_mac) {
     xarp_packet_t* arp_packet;
     xnet_packet_t* packet = prepare_packet_for_send(sizeof(xarp_packet_t));
 

@@ -16,7 +16,7 @@
 
 // ARP表项
 typedef struct _xarp_entry_t {
-    xip4_addr_t ipaddr; // ip地址
+    xip_addr_u ipaddr; // ip地址
     uint8_t macaddr[XNET_MAC_ADDR_SIZE]; // mac地址
     uint8_t state; // 状态位
     uint16_t ttl; // 剩余时间
@@ -98,4 +98,20 @@ int xnet_check_tmo(xnet_time_t* last_time, uint32_t gap_time) {
         return 1;
     }
     return 0;
+}
+
+/**
+ * 解析指定的IP地址，如果不在ARP表项中，则发送ARP请求
+ * @param ipaddr 查找的ip地址
+ * @param mac_addr 返回的mac地址存储区
+ * @return XNET_ERR_OK 查找成功，XNET_ERR_NONE 查找失败
+ */
+xnet_err_e xarp_resolve(const xip_addr_u* ipaddr, uint8_t** mac_addr) {
+    if ((arp_entry.state == XARP_ENTRY_OK) && xipaddr_is_equal(ipaddr, &arp_entry.ipaddr)) {
+        *mac_addr = arp_entry.macaddr;
+        return XNET_ERR_OK;
+    }
+
+    xarp_make_request(ipaddr);
+    return XNET_ERR_NONE;
 }

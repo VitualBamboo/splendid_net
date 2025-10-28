@@ -4,6 +4,8 @@
 #include "xnet_ip.h"
 
 #include <string.h>
+#include "xnet_arp.h"
+#include "xnet_ethernet.h"
 
 /**
  * 校验和计算
@@ -44,7 +46,7 @@ void xip_in(xnet_packet_t* packet) {
     xip_hdr_t* iphdr = (xip_hdr_t*) packet->data_start;
     uint32_t total_size, header_size;
     uint16_t pre_checksum;
-    xip4_addr_t src_ip;
+    xip_addr_u src_ip;
 
     // 进行一些必要性的检查：版本号要求
     if (iphdr->version != XNET_VERSION_IPV4) {
@@ -79,4 +81,43 @@ void xip_in(xnet_packet_t* packet) {
     //     default:
     //         break;
     // }
+}
+
+/**
+ * 将IP数据包通过以太网发送出去
+ * @param dest_ip 目标IP地址
+ * @param packet 待发送IP数据包
+ * @return 发送结果
+ */
+static xnet_err_e resolve_and_send(xip_addr_u* dest_ip, xnet_packet_t* packet) {
+    xnet_err_e err;
+    uint8_t* mac_addr;
+
+    if ((err = xarp_resolve(dest_ip, &mac_addr) == XNET_ERR_OK)) {
+        return ethernet_out_to(XNET_PROTOCOL_IP, mac_addr, packet);
+    }
+    return err;
+}
+
+xnet_err_e xip_out(xnet_protocol_e protocol, xip_addr_u* dest_ip, xnet_packet_t * packet) {
+    static uint32_t ip_packet_id = 0;
+    xip_hdr_t * iphdr;
+
+    add_header(packet, sizeof(xip_hdr_t));
+    iphdr = (xip_hdr_t*)packet->data_start;
+    iphdr->version = XNET_VERSION_IPV4;
+    iphdr->hdr_len = sizeof(xip_hdr_t) / 4;
+    iphdr->tos = 0; //不支持，填0
+    iphdr->total_len = swap_order16(packet->data_length);
+    iphdr->id = swap_order16(ip_packet_id);
+    iphdr->flags_fragment = 0; //不支持，填0
+    iphdr->ttl = XNET_IP_DEFAULT_TTL;
+    iphdr->protocol = protocol;
+    memcpy(iphdr->dest_ip, dest_ip->array, XNET_IPV4_ADDR_SIZE);
+    memcpy(iphdr->src_ip, netif_ipaddr.array, XNET_IPV4_ADDR_SIZE);
+    iphdr->hdr_checksum = 0;
+    iphdr->hdr_checksum = checksum16((uint16_t *)iphdr, sizeof(xip_hdr_t), 0, 1);;
+
+    ip_packet_id++;
+    return resolve_and_send(dest_ip, packet);
 }
