@@ -11,10 +11,11 @@ void xicmp_init(void) {
 }
 
 static xnet_status_t reply_icmp_request(xicmp_hdr_t* icmp_hdr, xip_addr_t* src_ip, xnet_packet_t* packet) {
-    // 答复继续使用
+    // 构建ICMP回复包
     xnet_packet_t* reply_packet = xnet_alloc_tx_packet(packet->data_length);
-    xicmp_hdr_t* reply_hdr = (xicmp_hdr_t*)reply_packet->data_start;
 
+    // 构建ICMP回复包头
+    xicmp_hdr_t* reply_hdr = (xicmp_hdr_t*)reply_packet->data_start;
     reply_hdr->type = XICMP_CODE_ECHO_REPLY;
     reply_hdr->code = 0;
     reply_hdr->id = icmp_hdr->id;
