@@ -6,6 +6,7 @@
 #include <string.h>
 #include "xnet_arp.h"
 #include "xnet_ethernet.h"
+#include "xnet_icmp.h"
 
 /**
  * 校验和计算
@@ -15,7 +16,7 @@
  * @param complement 是否对累加和的结果进行取反
  * @return 校验和结果
  */
-static uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int complement) {
+uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int complement) {
     // 使用32位接收16位，因为要处理溢出
     uint32_t checksum = pre_sum;
     uint16_t high;
@@ -72,15 +73,15 @@ void xip_in(xnet_packet_t* packet) {
         return;
     }
 
-    // xip4_addr_from_buf(&src_ip, iphdr->src_ip);
-    // switch(iphdr->protocol) {
-    //     case XNET_PROTOCOL_ICMP:
-    //         remove_header(packet, header_size);
-    //         xicmp_in(&src_ip, packet);
-    //         break;
-    //     default:
-    //         break;
-    // }
+    memcpy(src_ip.array, ip_hdr->src_ip, XNET_IPV4_ADDR_SIZE);
+    switch(ip_hdr->protocol) {
+        case XNET_PROTOCOL_ICMP:
+            remove_header(packet, header_size);
+            xicmp_in(&src_ip, packet);
+            break;
+        default:
+            break;
+    }
 }
 
 /**

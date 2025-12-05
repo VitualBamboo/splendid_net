@@ -29,5 +29,6 @@ typedef struct _xip_hdr_t {
 void xip_init(void);
 void xip_in(xnet_packet_t* packet);
 xnet_status_t xip_out(xnet_protocol_t protocol, xip_addr_u* dest_ip, xnet_packet_t * packet);
+uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int complement);
 
 #endif //XNET_IP_H

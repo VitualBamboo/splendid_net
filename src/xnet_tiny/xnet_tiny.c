@@ -5,6 +5,7 @@
 #include "xnet_ethernet.h"
 #include "xnet_arp.h"
 #include "xnet_ip.h"
+#include "xnet_icmp.h"
 
 #define min(a, b)               ((a) > (b) ? (b) : (a))
 
@@ -73,6 +74,7 @@ void xnet_init(void) {
     ethernet_init();
     xarp_init();
     xip_init();
+    xicmp_init();
 }
 
 /**
