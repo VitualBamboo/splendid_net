@@ -14,6 +14,7 @@ typedef struct _xudp_socket_t xudp_socket_t;
 // UDP 处理回调函数定义，类似于java中的接口，由业务类提供实现
 typedef xnet_status_t (*xudp_handler_t) (xudp_socket_t* udp_socket, xip_addr_t* src_ip, uint16_t src_port, xnet_packet_t* packet);
 
+// 控制块，不需要发送到网络，不用对齐
 struct _xudp_socket_t {
     enum {
         XUDP_STATE_FREE,
@@ -24,7 +25,16 @@ struct _xudp_socket_t {
     xudp_handler_t handler;
 };
 
+#pragma pack(1)
+typedef struct _xudp_hdr_t {
+    uint16_t src_port, dest_port;
+    uint16_t total_len;
+    uint16_t checksum;
+} xudp_hdr_t;
+#pragma pack()
+
 void xudp_init(void);
+void xudp_in(xudp_socket_t* udp_socket, xip_addr_t* src_ip, xnet_packet_t* packet);
 xudp_socket_t* xudp_open(xudp_handler_t handler);
 void xudp_close(xudp_socket_t* udp_socket);
 xudp_socket_t* xudp_find(uint16_t port);

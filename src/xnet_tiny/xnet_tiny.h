@@ -54,8 +54,9 @@ void truncate_packet(xnet_packet_t* packet, uint16_t size);
 
 typedef enum _xnet_protocol_t {
     XNET_PROTOCOL_ARP = 0x0806, // ARP协议
-    XNET_PROTOCOL_IP = 0x0800, // IP协议
-    XNET_PROTOCOL_ICMP = 1, // IP协议
+    XNET_PROTOCOL_IP = 0x0800,  // IP协议
+    XNET_PROTOCOL_ICMP = 1,     // IP协议
+    XNET_PROTOCOL_UDP = 17,     // UDP协议
 } xnet_protocol_t;
 
 // IP地址，使用共用体，节省空间

@@ -7,6 +7,7 @@
 #include "xnet_arp.h"
 #include "xnet_ethernet.h"
 #include "xnet_icmp.h"
+#include "xnet_udp.h"
 
 /**
  * 校验和计算
@@ -16,7 +17,7 @@
  * @param complement 是否对累加和的结果进行取反
  * @return 校验和结果
  */
-uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int complement) {
+uint16_t checksum16(uint16_t* buf, uint16_t len, uint16_t pre_sum, int complement) {
     // 使用32位接收16位，因为要处理溢出
     uint32_t checksum = pre_sum;
     uint16_t high;
@@ -37,6 +38,34 @@ uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int compleme
     }
     // 传入的是1，就对sum取反
     return complement ? (uint16_t)~checksum : (uint16_t)checksum;
+}
+
+// 计算带有伪头部的校验和
+uint16_t checksum_peso(const xip_addr_t* src_ip, const xip_addr_t* dest_ip, uint8_t protocol,
+                      uint16_t* buf, uint16_t len) {
+
+    // 1. 伪头部要求：协议号前需填充 1 字节 0，以构成一个完整的 16 位字。
+    uint8_t zero_protocol[] = { 0, protocol };
+
+    // 2. 伪头部要求：传输层数据段的长度（len）必须以网络字节序参与校验和计算。
+    uint16_t c_len = swap_order16(len);
+
+    // 3. 初始化校验和累加器 sum，计算源 IP 地址 (4字节) 的 16 位求和。
+    uint32_t sum = checksum16((uint16_t*)src_ip->addr, XNET_IPV4_ADDR_SIZE, 0, 0);
+
+    // 累加目的 IP 地址 (4字节) 的 16 位求和。
+    sum = checksum16((uint16_t*)dest_ip->addr, XNET_IPV4_ADDR_SIZE, sum, 0);
+
+    // 累加 (0 + 协议号) 字段 (2字节) 的 16 位求和。
+    sum = checksum16((uint16_t*)zero_protocol, 2, sum, 0);
+
+    // 累加长度字段 c_len (2字节) 的 16 位求和。
+    sum = checksum16((uint16_t*)&c_len, 2, sum, 0);
+
+    // 4. 最终计算
+    // 累加传输层数据段 (buf 和 len) 的校验和到 sum 中。
+    // 最后一个参数 '1' 表示这是最后一次调用，checksum16 内部将完成最终的反码运算和溢出处理，返回最终的 16 位校验和结果。
+    return checksum16(buf, len, sum, 1);
 }
 
 void xip_init(void) {
@@ -76,6 +105,19 @@ void xip_in(xnet_packet_t* packet) {
 
     memcpy(src_ip.addr, ip_hdr->src_ip, XNET_IPV4_ADDR_SIZE);
     switch(ip_hdr->protocol) {
+        case XNET_PROTOCOL_UDP:
+            if (packet->length >= sizeof(xudp_hdr_t)) {
+                // 这里还没有移除ip头部，所以需要手动后移
+                xudp_hdr_t* udp_hdr = (xudp_hdr_t*)(packet->data + header_size);
+                xudp_socket_t* udp_socket = xudp_find(swap_order16(udp_hdr->dest_port));
+                if (udp_socket) {
+                    remove_header(packet, header_size);
+                    xudp_in(udp_socket, &src_ip, packet);
+                } else {
+                    xicmp_dest_unreach(XICMP_CODE_PORT_UNREACH, ip_hdr);
+                }
+            }
+            break;
         case XNET_PROTOCOL_ICMP:
             remove_header(packet, header_size);
             xicmp_in(&src_ip, packet);

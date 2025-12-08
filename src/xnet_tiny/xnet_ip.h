@@ -30,5 +30,7 @@ void xip_init(void);
 void xip_in(xnet_packet_t* packet);
 xnet_status_t xip_out(xnet_protocol_t protocol, xip_addr_t* dest_ip, xnet_packet_t * packet);
 uint16_t checksum16(uint16_t * buf, uint16_t len, uint16_t pre_sum, int complement);
+uint16_t checksum_peso(const xip_addr_t* src_ip, const xip_addr_t* dest_ip, uint8_t protocol,
+                      uint16_t* buf, uint16_t len);
 
 #endif //XNET_IP_H
