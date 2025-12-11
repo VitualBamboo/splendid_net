@@ -13,7 +13,7 @@ void xudp_init(void) {
     memset(udp_socket_pool, 0, sizeof(udp_socket_pool));
 }
 
-void xudp_input(xudp_socket_t* socket, xip_addr_t* src_ip, xnet_packet_t* packet)
+void xudp_in(xudp_socket_t* socket, xip_addr_t* src_ip, xnet_packet_t* packet)
 {
     xudp_hdr_t* udp_hdr = (xudp_hdr_t*) packet->data;
     uint16_t pre_checksum;

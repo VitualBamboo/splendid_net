@@ -10,6 +10,32 @@
 // 1. 配置宏：名字更具体，表明是 Socket 的最大数量
 #define XTCP_MAX_SOCKET_COUNT   40
 
+#define XTCP_FLAG_FIN    (1 << 0)
+#define XTCP_FLAG_SYN    (1 << 1)
+#define XTCP_FLAG_RST    (1 << 2)
+#define XTCP_FLAG_ACK    (1 << 4)
+
+#pragma pack(1)
+typedef struct _xtcp_hdr_t {
+    uint16_t src_port;
+    uint16_t dest_port;
+    uint32_t seq;
+    uint32_t ack;
+    union {
+        uint16_t all;
+        struct {
+            uint16_t flags : 6;       // 低6位
+            uint16_t reserved : 6;    // 中间6位
+            uint16_t hdr_len : 4;     // 高4位
+        };
+    }hdr_flags;
+
+    uint16_t window;
+    uint16_t checksum;
+    uint16_t urgent_ptr;
+}xtcp_hdr_t;
+#pragma pack(0)
+
 // 2. Socket 生命周期状态
 typedef enum _xtcp_socket_state_t {
     XTCP_STATE_FREE,
@@ -42,6 +68,7 @@ struct _xtcp_socket_t {
 };
 
 void xtcp_init(void);
+void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet);
 
 xtcp_socket_t* xtcp_alloc_socket(xtcp_event_handler_t handler);
 xnet_status_t xtcp_bind_socket(xtcp_socket_t* socket, uint16_t local_port);

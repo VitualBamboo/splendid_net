@@ -7,6 +7,19 @@
 #include <stdint.h>
 
 #define swap_order16(v)   ((((v) & 0xFF) << 8) | (((v) >> 8) & 0xFF)) // 大小端转换
+#define swap_order32(v) ( \
+/* 1. 把最后的积木 D 移到最前面 (左移 24) */ \
+(((v) & 0xFF) << 24) | \
+\
+/* 2. 把倒数第二的积木 C 移到第二个位置 (左移 16) */ \
+((((v) >> 8) & 0xFF) << 16) | \
+\
+/* 3. 把第二个积木 B 移到倒数第二的位置 (左移 8) */ \
+((((v) >> 16) & 0xFF) << 8) | \
+\
+/* 4. 把最前面的积木 A 移到最后面 (右移 24) */ \
+(((v) >> 24) & 0xFF) \
+)
 #define XNET_CFG_PACKET_MAX_SIZE        1514                // 收发数据包的最大大小 1500+6+6+2
 #define XNET_CFG_DEFAULT_IP               {192, 168, 254, 2}  // 协议栈的IP地址
 #define xip_addr_eq(a, b)  (memcmp((a), (b), XNET_IPV4_ADDR_SIZE) == 0)
@@ -24,11 +37,11 @@ typedef enum _xnet_status_t {
     XNET_ERR_STATE = -5,
 } xnet_status_t;
 
-// 网络数据包
+// 网络数据包，大端，所见即所得
 typedef struct _xnet_packet_t {
-    uint16_t length;                          // 包中有效数据大小（因为并不一定会占满缓冲区）
-    uint8_t* data;                           // 包的数据起始地址
-    uint8_t buffer[XNET_CFG_PACKET_MAX_SIZE];      // 缓冲区
+    uint16_t length;                                // 包中有效数据大小（因为并不一定会占满缓冲区）
+    uint8_t* data;                                  // 包的数据起始地址
+    uint8_t buffer[XNET_CFG_PACKET_MAX_SIZE];       // 缓冲区
 } xnet_packet_t;
 
 typedef uint32_t xnet_time_t;           // 时间类型
@@ -54,13 +67,14 @@ void remove_header(xnet_packet_t* packet, uint16_t header_size);
 void truncate_packet(xnet_packet_t* packet, uint16_t size);
 
 typedef enum _xnet_protocol_t {
-    XNET_PROTOCOL_ARP = 0x0806, // ARP协议
     XNET_PROTOCOL_IP = 0x0800,  // IP协议
+    XNET_PROTOCOL_ARP = 0x0806, // ARP协议
     XNET_PROTOCOL_ICMP = 1,     // IP协议
+    XNET_PROTOCOL_TCP = 6,      // TCP协议
     XNET_PROTOCOL_UDP = 17,     // UDP协议
 } xnet_protocol_t;
 
-// IP地址，使用共用体，节省空间
+// IP地址
 typedef struct _xip_addr_t {
     uint8_t addr[XNET_IPV4_ADDR_SIZE]; // 以字节形式存储的ip
 } xip_addr_t;

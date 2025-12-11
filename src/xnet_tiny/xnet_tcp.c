@@ -5,12 +5,67 @@
 #include "xnet_tcp.h"
 #include <string.h>
 
+#include "xnet_ip.h"
+
 // 静态资源池
 static xtcp_socket_t tcp_socket_pool[XTCP_MAX_SOCKET_COUNT];
+
+static xnet_status_t tcp_send_reset(uint32_t remote_ack, uint16_t local_port, xip_addr_t* remote_ip, uint16_t remote_port) {
+    xnet_packet_t* packet = xnet_alloc_tx_packet(sizeof(xtcp_hdr_t));
+    xtcp_hdr_t* tcp_hdr = (xtcp_hdr_t*) packet->data;
+
+    tcp_hdr->src_port = swap_order16(local_port);
+    tcp_hdr->dest_port = swap_order16(remote_port);
+    tcp_hdr->seq = 0;
+    tcp_hdr->ack = swap_order32(remote_ack);
+    tcp_hdr->hdr_flags.all = 0;
+    tcp_hdr->hdr_flags.hdr_len = sizeof(xtcp_hdr_t) / 4;
+    tcp_hdr->hdr_flags.flags = XTCP_FLAG_RST | XTCP_FLAG_ACK;
+    tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
+    tcp_hdr->window = 0;
+    tcp_hdr->checksum = 0;
+    tcp_hdr->urgent_ptr = 0;
+
+    tcp_hdr->checksum = checksum_peso(&xnet_local_ip, remote_ip, XNET_PROTOCOL_TCP, (uint16_t*)packet->data, packet->length);
+    tcp_hdr->checksum = tcp_hdr->checksum ? tcp_hdr->checksum : 0xFFFF;
+    return xip_out(XNET_PROTOCOL_TCP, remote_ip, packet);
+}
 
 void xtcp_init(void) {
     // 整体清零，确保所有状态为 XTCP_STATE_FREE (0)
     memset(tcp_socket_pool, 0, sizeof(tcp_socket_pool));
+}
+
+void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
+    xtcp_hdr_t* tcp_hdr = (xtcp_hdr_t*) packet->data;
+    uint16_t pre_checksum;
+    xtcp_socket_t* socket;
+
+    if (packet->length < sizeof(xtcp_hdr_t)) {
+        return;
+    }
+
+    pre_checksum = tcp_hdr->checksum;
+    tcp_hdr->checksum = 0;
+    if (pre_checksum != 0) {
+        uint16_t checksum = checksum_peso(remote_ip, &xnet_local_ip, XNET_PROTOCOL_TCP, (uint16_t*) tcp_hdr, packet->length);
+        checksum = (checksum == 0) ? 0xFFFF : checksum;
+        if (checksum != pre_checksum) {
+            return;
+        }
+    }
+
+    tcp_hdr->src_port = swap_order16(tcp_hdr->src_port);
+    tcp_hdr->dest_port = swap_order16(tcp_hdr->dest_port);
+    tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
+    tcp_hdr->seq = swap_order32(tcp_hdr->seq);
+    tcp_hdr->ack = swap_order32(tcp_hdr->ack);
+    tcp_hdr->window = swap_order16(tcp_hdr->window);
+
+    socket = xtcp_find_socket(remote_ip, tcp_hdr->src_port, tcp_hdr->dest_port);
+    if (socket == NULL) {
+        tcp_send_reset(tcp_hdr->seq + 1, tcp_hdr->dest_port, remote_ip, tcp_hdr->src_port);
+    }
 }
 
 xtcp_socket_t* xtcp_alloc_socket(xtcp_event_handler_t handler) {

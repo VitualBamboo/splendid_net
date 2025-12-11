@@ -7,6 +7,7 @@
 #include "xnet_arp.h"
 #include "xnet_ethernet.h"
 #include "xnet_icmp.h"
+#include "xnet_tcp.h"
 #include "xnet_udp.h"
 
 /**
@@ -112,11 +113,15 @@ void xip_in(xnet_packet_t* packet) {
                 xudp_socket_t* udp_socket = xudp_find_socket(swap_order16(udp_hdr->dest_port));
                 if (udp_socket) {
                     remove_header(packet, header_size);
-                    xudp_input(udp_socket, &src_ip, packet);
+                    xudp_in(udp_socket, &src_ip, packet);
                 } else {
                     xicmp_dest_unreach(XICMP_CODE_PORT_UNREACH, ip_hdr);
                 }
             }
+            break;
+        case XNET_PROTOCOL_TCP:
+            remove_header(packet, header_size);
+            xtcp_in(&src_ip, packet);
             break;
         case XNET_PROTOCOL_ICMP:
             remove_header(packet, header_size);
