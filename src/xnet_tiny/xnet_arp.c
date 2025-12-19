@@ -107,11 +107,21 @@ int xnet_check_tmo(xnet_time_t* last_time, uint32_t gap_time) {
  * @return XNET_ERR_OK 查找成功，XNET_ERR_NONE 查找失败
  */
 xnet_status_t xarp_resolve(const xip_addr_t* ipaddr, uint8_t** mac_addr) {
-    if ((arp_entry.state == XARP_ENTRY_OK) && xip_addr_eq(ipaddr->addr, &arp_entry.ipaddr.addr)) {
+    if ((arp_entry.state == XARP_ENTRY_OK) && xip_addr_eq(ipaddr->addr, arp_entry.ipaddr.addr)) {
         *mac_addr = arp_entry.macaddr;
         return XNET_OK;
     }
 
-    xarp_make_request(ipaddr);
+    // 如果已经在解析这个IP了，就不要重置 retry_cnt，避免无限重置
+    if (arp_entry.state != XARP_ENTRY_RESOLVING || !xip_addr_eq(ipaddr->addr, arp_entry.ipaddr.addr)) {
+        memcpy(arp_entry.ipaddr.addr, ipaddr->addr, XNET_IPV4_ADDR_SIZE);
+        arp_entry.state = XARP_ENTRY_RESOLVING;
+        arp_entry.ttl = XARP_CFG_ENTRY_RESOLVING_TMO; // 5秒
+        arp_entry.retry_cnt = XARP_CFG_MAX_RETRIES;   // 3次
+
+        // 发送第一次请求
+        xarp_make_request(ipaddr);
+    }
+
     return XNET_ERR_NONE;
 }

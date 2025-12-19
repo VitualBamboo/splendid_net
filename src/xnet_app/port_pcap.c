@@ -13,13 +13,21 @@ static pcap_t* pcap;
  * pcap 所用的真实网卡，物理网卡
  * 一般为主机 ip 地址
  */
+#ifdef _WIN32
 const char *ip_str = "192.168.254.1";
+#else
+const char *ip_str = "192.168.189.101";
+#endif
 
 /**
  * 协议栈虚拟 mac
  *
  */
+#ifdef _WIN32
 const char default_mac_addr[] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66};
+#else
+const char default_mac_addr[] = {0x00, 0x0c, 0x29, 0xc5, 0xec, 0x62};
+#endif
 
 /**
  * 初始化网络驱动
@@ -66,18 +74,13 @@ xnet_status_t xnet_driver_read(xnet_packet_t** packet) {
 
 /**
  * 获取自程序启动以来，过去了多长时间
+ * 使用墙钟时间，而不是CPU时间
+ * 原代码使用 clock()。在 Windows 上它近似于“墙钟时间”，但在 Linux 上它严格遵循 POSIX 标准返回 CPU 时间
  * @return 程序的系统时间
  */
 const xnet_time_t xsys_get_time(void) {
-    static uint32_t pre = 0;
-
-    // 以下部分仅供调试时使用
-#if 0
-    uint32_t c = clock() / CLOCKS_PER_SEC;
-    if (c != pre) {
-        printf("sec: %d, 100ms: %d\n", c, (xnet_time_t)(clock()  * 10 / CLOCKS_PER_SEC));
-        pre = c;
-    }
-#endif
-    return (xnet_time_t)(clock() / CLOCKS_PER_SEC);
+    struct timespec ts;
+    // CLOCK_MONOTONIC 保证时间单调递增，不受修改系统时间影响
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec;
 }

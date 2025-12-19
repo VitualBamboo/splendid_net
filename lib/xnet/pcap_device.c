@@ -229,21 +229,47 @@ pcap_t* pcap_device_open(const char* ip, const uint8_t * mac_addr, uint8_t poll_
         mask = 0;
     }
 
-    pcap = pcap_open_live(name_buf,    // 设置字符串
-                          65536,  // 要捕获的最大字节数
-                          1, // 混杂模式
-                          0, // 读取超时（以毫秒为单位）
-                          err_buf);
+    // ================== 修改开始 ==================
+    // 原始代码: pcap = pcap_open_live(name_buf, 65536, 1, 0, err_buf);
+    // 问题原因: pcap_open_live 第4个参数为0表示无限等待缓冲填满，导致几十秒延迟
+
+    // 新代码: 使用 pcap_create + pcap_activate 流程以支持“立即模式”
+    pcap = pcap_create(name_buf, err_buf);
     if (pcap == NULL) {
         fprintf(stderr, "pcap_open: create pcap failed %s\n net card name: %s\n", err_buf, name_buf);
-        fprintf(stderr, "Use the following:\n");
-        pcap_show_list();
         return (pcap_t*)0;
     }
+
+    // 1. 设置快照长度 (对应 open_live 的 65536)
+    pcap_set_snaplen(pcap, 65536);
+
+    // 2. 设置混杂模式 (对应 open_live 的 1)
+    pcap_set_promisc(pcap, 1);
+
+    // 3. 【核心修复】设置立即模式
+    // 告诉内核收到包立刻拷贝给用户层，不要缓冲！
+    pcap_set_immediate_mode(pcap, 1);
+
+    // 4. 设置超时时间 (对应 open_live 的 0 -> 改为 1ms)
+    // 即使在非阻塞模式下，设置一个极短的超时也比0(无限)安全
+    pcap_set_timeout(pcap, 1);
+
+    // 5. 激活句柄
+    int status = pcap_activate(pcap);
+    if (status < 0) {
+        fprintf(stderr, "pcap_open: activate failed: %s\n", pcap_geterr(pcap));
+        pcap_close(pcap);
+        return (pcap_t*)0;
+    } else if (status > 0) {
+        // 警告信息，比如是在混杂模式下
+        fprintf(stderr, "pcap_open: warning: %s\n", pcap_geterr(pcap));
+    }
+    // ================== 修改结束 ==================
 
     // 非阻塞模式读取，程序中使用查询的方式读
     if (pcap_setnonblock(pcap, 1, err_buf) != 0) {
         fprintf(stderr, "pcap_open: set none block failed: %s\n", pcap_geterr(pcap));
+        pcap_close(pcap); // 失败记得关闭
         return (pcap_t*)0;
     }
 
@@ -251,7 +277,6 @@ pcap_t* pcap_device_open(const char* ip, const uint8_t * mac_addr, uint8_t poll_
     // 注：win平台似乎不支持这个选项
     if (pcap_setdirection(pcap, PCAP_D_IN) != 0) {
         // fprintf(stderr, "pcap_open: set direction not suppor: %s\n", pcap_geterr(pcap));
-
     }
 
     // 只捕获发往本接口与广播的数据帧。相当于只处理发往这张网卡的包
@@ -259,12 +284,15 @@ pcap_t* pcap_device_open(const char* ip, const uint8_t * mac_addr, uint8_t poll_
             "(ether dst %02x:%02x:%02x:%02x:%02x:%02x or ether broadcast) and (not ether src %02x:%02x:%02x:%02x:%02x:%02x)",
             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5],
             mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
+
     if (pcap_compile(pcap, &fp, filter_exp, 0, net) == -1) {
         printf("pcap_open: couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(pcap));
+        pcap_close(pcap);
         return (pcap_t*)0;
     }
     if (pcap_setfilter(pcap, &fp) == -1) {
         printf("pcap_open: couldn't install filter %s: %s\n", filter_exp, pcap_geterr(pcap));
+        pcap_close(pcap);
         return (pcap_t*)0;
     }
 
