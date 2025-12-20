@@ -166,7 +166,7 @@ void ethernet_in(xnet_packet_t* packet) {
             break;
         case XNET_PROTOCOL_IP: {
             // 避免客户端第一次发送请求没有响应
-            xip_hdr_t* ip_hdr = packet->data + sizeof(xether_hdr_t);
+            xip_hdr_t* ip_hdr = (xip_hdr_t*)(packet->data + sizeof(xether_hdr_t));
             update_arp_entry(ip_hdr->src_ip, ether_hdr->src);
             remove_header(packet, sizeof(xether_hdr_t));
             xip_in(packet);

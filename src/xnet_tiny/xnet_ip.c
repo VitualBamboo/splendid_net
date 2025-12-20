@@ -3,6 +3,7 @@
 //
 #include "xnet_ip.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "xnet_arp.h"
 #include "xnet_ethernet.h"
@@ -123,6 +124,8 @@ void xip_in(xnet_packet_t* packet) {
             xtcp_in(&src_ip, packet);
             break;
         case XNET_PROTOCOL_ICMP:
+            printf(">> [ICMP] Recv packet from: %d.%d.%d.%d\n",
+                   src_ip.addr[0], src_ip.addr[1], src_ip.addr[2], src_ip.addr[3]);
             remove_header(packet, ip_hdr_len);
             xicmp_in(&src_ip, packet);
             break;

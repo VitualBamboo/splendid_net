@@ -183,7 +183,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
     // 将pcb环形缓冲区的数据拷贝到packet
     tcp_buf_read_for_send(&pcb->tx_buf, packet->data + opt_size + sizeof(xtcp_hdr_t), data_size);
 
-    tcp_hdr->checksum = checksum_peso(xnet_local_ip.addr, &pcb->remote_ip, XNET_PROTOCOL_TCP,
+    tcp_hdr->checksum = checksum_peso(&xnet_local_ip, &pcb->remote_ip, XNET_PROTOCOL_TCP,
                                      (uint16_t*)packet->data, packet->length);
     tcp_hdr->checksum = tcp_hdr->checksum ? tcp_hdr->checksum : 0xFFFF;
 
