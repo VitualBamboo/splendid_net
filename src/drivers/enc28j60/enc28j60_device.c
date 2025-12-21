@@ -1,5 +1,5 @@
 ﻿#include <stdio.h>
-#include "enc28j60_device.h"     
+#include "../../../lib/xnet/enc28j60_device.h"
 
 // 一共8KB的以太网缓存
 static u8 ENC28J60BANK;

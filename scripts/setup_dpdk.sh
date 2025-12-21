@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # 1. 分配大页内存 (1024 * 2MB = 2GB)
 echo "[1/5] Allocating hugepages..."
 sudo sh -c 'echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages'
@@ -17,9 +19,9 @@ sudo ip link set ens37 down
 # 5. 绑定网卡给 DPDK
 # (请确认你的 dpdk-devbind.py 路径)
 echo "[5/5] Binding NIC $NIC_PCI_ID to vfio-pci..."
-sudo ~/dpdk-stable-22.11.10/usertools/dpdk-devbind.py -b vfio-pci 0000:02:05.0
+sudo /home/efairy520/dpdk-stable-22.11.10/usertools/dpdk-devbind.py -b vfio-pci 0000:02:05.0
 
 # 6. 验证 (可选)
 echo "Setup Complete. Current Status:"
-sudo ~/dpdk-stable-22.11.10/usertools/dpdk-devbind.py -s
+sudo /home/efairy520/dpdk-stable-22.11.10/usertools/dpdk-devbind.py -s
 # 看到 0000:02:05.0 对应的 drv=vfio-pci 就成功了
