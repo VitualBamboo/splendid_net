@@ -36,11 +36,17 @@ else()
     add_compile_definitions(ALLOW_EXPERIMENTAL_API)
 endif()
 
-# =======================================================
-# 2. 添加子模块 (顺序无所谓)
-# =======================================================
+# 2. 添加子模块
 add_subdirectory(src/xnet_tiny)
 add_subdirectory(src/xnet_app)
+# 注意：一定要放在 xnet_port 之前，因为 xnet_port 要用它
+if(WIN32)
+    # 注册 pcap 驱动库！
+    add_subdirectory(src/drivers/pcap)
+else()
+    # 注册 Linux 的驱动库！
+    add_subdirectory(src/drivers/dpdk)
+endif()
 add_subdirectory(src/xnet_port)
 
 # =======================================================
