@@ -20,7 +20,7 @@ target_include_directories(xnet_port
         PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
         PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/xnet_tiny
+        ${PROJECT_SOURCE_DIR}/src/xnet_tiny/core
 )
 
 
