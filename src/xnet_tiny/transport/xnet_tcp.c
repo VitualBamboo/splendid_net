@@ -249,6 +249,38 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
     return XNET_OK;
 }
 
+// 分配PCB
+static xtcp_pcb_t* xtcp_pcb_alloc_common(void) {
+    for (xtcp_pcb_t* pcb = tcp_pcb_pool; pcb < &tcp_pcb_pool[XTCP_PCB_MAX_NUM]; pcb++) {
+        // 找到空闲槽位
+        if (pcb->state == XTCP_STATE_FREE) {
+
+            // A. 物理清零 (抹去上一次连接的痕迹)
+            memset(pcb, 0, sizeof(xtcp_pcb_t));
+
+            // B. 状态初始化
+            pcb->state = XTCP_STATE_CLOSED;
+
+            // C. 核心组件初始化 (这是之前 accept 里经常漏写的！)
+            tcp_buf_init(&pcb->tx_buf);
+            tcp_buf_init(&pcb->rx_buf);
+
+            // D. 协议参数初始化 (出厂默认值)
+            pcb->remote_mss = XTCP_MSS_DEFAULT;
+            pcb->remote_win = XTCP_WIN_DEFAULT;
+
+            // E. 身份标识初始化 (随机序列号)
+            // 无论是主动连别人，还是被动接受，我都得有个随机的初始 Seq
+            pcb->snd_nxt = tcp_get_init_seq();
+            pcb->snd_una = pcb->snd_nxt;
+
+            // 返回这个“标准件”
+            return pcb;
+        }
+    }
+    return NULL;
+}
+
 // 分配一个可用pcb，使用zero alloc，避免复用污染
 static xtcp_pcb_t* xtcp_pcb_zalloc() {
     for (xtcp_pcb_t* pcb = tcp_pcb_pool; pcb < &tcp_pcb_pool[XTCP_PCB_MAX_NUM]; pcb++) {
@@ -283,34 +315,38 @@ static void tcp_pcb_free(xtcp_pcb_t* pcb) {
     pcb->state = XTCP_STATE_FREE;
 }
 
-// 构造child pcb，接受第一次握手数据
-static void tcp_process_accept(xtcp_pcb_t* listen_pcb, xip_addr_t* remote_ip, xtcp_hdr_t* tcp_hdr) {
+// 监听状态下的输入处理（发送第二次握手）
+static void xtcp_listen_input(xtcp_pcb_t* listen_pcb, xip_addr_t* remote_ip, xtcp_hdr_t* tcp_hdr) {
     uint16_t hdr_flags = tcp_hdr->hdr_flags.all;
 
-    // 只有 SYN 才能触发 Accept 逻辑
+    // 非 SYN 包直接 RST
     if (!(hdr_flags & XTCP_FLAG_SYN)) {
         tcp_send_reset(tcp_hdr->seq, listen_pcb->local_port, remote_ip, tcp_hdr->src_port);
         return;
     }
 
-    // 这里不能使用new pcb，因为有太多个性化配置
-    xtcp_pcb_t* child_pcb = xtcp_pcb_zalloc();
+    // 1. 拿一个标准件 (此时缓冲区、随机Seq都准备好了！)
+    xtcp_pcb_t* child_pcb = xtcp_pcb_alloc_common();
     if (!child_pcb) return;
 
-    child_pcb->state = XTCP_STATE_SYN_RECVD; // 直接空降到SYN_RECVD状态
-    child_pcb->event_cb = listen_pcb->event_cb; // 继承listen_pcb的回调，应用层传入http_handler
-    child_pcb->local_port = listen_pcb->local_port; // 继承listen_pcb的端口，应用层传入80
-    child_pcb->remote_ip = *remote_ip; // IP层传入
+    // 2. 个性化配置 (连接侧特有)
+    // 2.1 继承“父业”
+    child_pcb->event_cb = listen_pcb->event_cb;   // 继承回调
+    child_pcb->local_port = listen_pcb->local_port; // 继承端口
+
+    // 2.2 录入“客人”信息
+    child_pcb->state = XTCP_STATE_SYN_RECVD;      // 状态跃迁
+    child_pcb->remote_ip = *remote_ip;
     child_pcb->remote_port = tcp_hdr->src_port;
     child_pcb->remote_win = tcp_hdr->window;
-    child_pcb->rcv_nxt = tcp_hdr->seq + 1; // SYN占用一个字节
-    child_pcb->snd_nxt = tcp_get_init_seq(); // 生成随机序列号 (否则默认是0)
-    child_pcb->snd_una = child_pcb->snd_nxt;
 
-    // 解析选项中的MSS
+    // 2.3 同步进度 (Seq)
+    child_pcb->rcv_nxt = tcp_hdr->seq + 1;
+
+    // 3. 协议协商 (MSS)
     tcp_read_mss(child_pcb, tcp_hdr);
 
-    // 发送 SYN + ACK
+    // 4. 发送 SYN+ACK
     xnet_status_t status = tcp_send_segment(child_pcb, XTCP_FLAG_SYN | XTCP_FLAG_ACK);
     if (status < 0) {
         tcp_pcb_free(child_pcb);
@@ -354,10 +390,10 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
         return;
     }
 
-    // 收到第一次握手
+    // pcb处于监听状态（收到第一次握手）
     if (pcb->state == XTCP_STATE_LISTEN) {
-        // 发送第二次握手
-        tcp_process_accept(pcb, remote_ip, tcp_hdr);
+        // 监听状态下的输入处理（发送第二次握手）
+        xtcp_listen_input(pcb, remote_ip, tcp_hdr);
         return;
     }
 
@@ -484,20 +520,17 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
     }
 }
 
-// 新建一个pcb控制块
+// 2. 重构 xtcp_pcb_new (面向用户)
+// 用户的需求：我要一个 PCB，后面我会绑定端口去 Listen，或者 Connect 别人
 xtcp_pcb_t* xtcp_pcb_new(xtcp_event_handler_t handler) {
-    // Alloc (分配内存)
-    xtcp_pcb_t* pcb = xtcp_pcb_zalloc();
-    if (!pcb) {
-        return NULL;
-    }
+    // 1. 拿一个标准件
+    xtcp_pcb_t* pcb = xtcp_pcb_alloc_common();
+    if (!pcb) return NULL;
 
-    // Init (协议初始化)
-    xtcp_pcb_init(pcb);
-
-    // Setup (用户自定义配置)
+    // 2. 个性化配置 (用户侧特有)
     pcb->event_cb = handler;
 
+    // 3. 状态已经在 base 里设为 CLOSED 了，不用动
     return pcb;
 }
 
