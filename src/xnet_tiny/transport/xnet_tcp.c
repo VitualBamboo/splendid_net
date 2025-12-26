@@ -66,7 +66,7 @@ static void tcp_buf_advance_send(xtcp_buf_t* tcp_buf, uint16_t len) {
 
 // 从 TCP 发送缓冲区中读取数据拷贝到 packet 中
 // 注意：此函数不修改 tcp_buf 的任何指针，仅仅是 Copy
-static void tcp_buf_read_for_send(xtcp_buf_t* tcp_buf, uint8_t* dest, uint16_t len) {
+static void tcp_buf_peek(xtcp_buf_t* tcp_buf, uint8_t* dest, uint16_t len) {
     // 使用局部变量 cursor，不触碰 tcp_buf->send_idx
     uint16_t cursor = tcp_buf->send_idx;
 
@@ -84,25 +84,25 @@ static void tcp_buf_read_for_send(xtcp_buf_t* tcp_buf, uint8_t* dest, uint16_t l
     }
 }
 
-// 将数据写入到tcp
-static uint16_t tcp_buf_append(xtcp_buf_t* tcp_buf, uint8_t* src, uint16_t len) {
+// 将数据拼接到缓冲区
+static uint16_t tcp_buf_put(xtcp_buf_t* tcp_buf, uint8_t* src, uint16_t len) {
     // 待写入数据与剩余空间，取最小值
-    int write_len = min(len, tcp_buf_free_count(tcp_buf));
+    uint16_t copy_len = min(len, tcp_buf_free_count(tcp_buf));
 
     // 一对一复制，移动write_idx指针（下个可写入位置）
-    for (int i = 0; i < write_len; i++) {
+    for (uint16_t i = 0; i < copy_len; i++) {
         tcp_buf->data[tcp_buf->write_idx++] = *src++;
         if (tcp_buf->write_idx >= XTCP_CFG_RTX_BUF_SIZE) {
             tcp_buf->write_idx = 0; //遇到边缘回绕
         }
     }
 
-    return write_len;
+    return copy_len;
 }
 
 static uint16_t tcp_recv(xtcp_pcb_t* pcb, uint8_t flags, uint8_t* src, uint16_t len) {
     // 1. 将收到的 payload 写入接收缓冲区 (rx_buf)
-    uint16_t read_len = tcp_buf_append(&pcb->rx_buf, src, len);
+    uint16_t read_len = tcp_buf_put(&pcb->rx_buf, src, len);
 
     // 2. 累加 ACK 号，准备下次告诉对方我收到了多少
     pcb->rcv_nxt += read_len;
@@ -117,7 +117,7 @@ static uint16_t tcp_recv(xtcp_pcb_t* pcb, uint8_t flags, uint8_t* src, uint16_t 
 // 从 TCP 接收缓冲区读取数据 (消费数据)
 // 参数 dest: 目标缓冲区 (Destination)
 // 参数 len:  想读取的长度 (Length)
-static uint16_t tcp_buf_read(xtcp_buf_t* tcp_buf, uint8_t* dest, uint16_t len) {
+static uint16_t tcp_buf_pull(xtcp_buf_t* tcp_buf, uint8_t* dest, uint16_t len) {
 
     // 1. 获取库存量
     uint16_t used = tcp_buf_used_count(tcp_buf);
@@ -224,7 +224,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
         *(uint16_t*)(opt_data + 2) = swap_order16(XTCP_MSS_DEFAULT);
     }
     // 将pcb发送缓冲区的数据拷贝到packet
-    tcp_buf_read_for_send(&pcb->tx_buf, packet->data + opt_len + sizeof(xtcp_hdr_t), payload_len);
+    tcp_buf_peek(&pcb->tx_buf, packet->data + opt_len + sizeof(xtcp_hdr_t), payload_len);
 
     tcp_hdr->checksum = checksum_peso(&xnet_local_ip, &pcb->remote_ip, XNET_PROTOCOL_TCP,
                                      (uint16_t*)packet->data, packet->len);
@@ -233,7 +233,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
     xnet_status_t status = xip_out(XNET_PROTOCOL_TCP, &pcb->remote_ip, packet);
     if (status < 0) return status;
 
-    // 发送后，增加unacked的数量
+    // 发送后，移动send_idx
     if (payload_len > 0) {
         tcp_buf_advance_send(&pcb->tx_buf, payload_len);
     }
@@ -524,21 +524,22 @@ xnet_status_t xtcp_pcb_listen(xtcp_pcb_t* pcb) {
     return XNET_OK;
 }
 
-// 向tcp中写入数据
-int xtcp_write(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len) {
+// 使用tcp发送数据
+int xtcp_send(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len) {
     if ((pcb->state != XTCP_STATE_ESTABLISHED)) {
         return -1;
     }
-    // 将数据拷贝到pcb->tx_buf，移动front
-    int written = tcp_buf_append(&pcb->tx_buf, src, len);
-    if (written) {
+    // 将数据拷贝到pcb->tx_buf，移动write_idx
+    uint16_t written = tcp_buf_put(&pcb->tx_buf, src, len);
+    if (written > 0) {
         tcp_send_segment(pcb, XTCP_FLAG_ACK); // 只要连接建立，每一次发送都要带ACK
     }
     return written;
 }
 
-int xtcp_read(xtcp_pcb_t* pcb, uint8_t* dest, uint16_t len) {
-    return tcp_buf_read(&pcb->rx_buf, dest, len);
+// 使用tcp接收数据
+int xtcp_recv(xtcp_pcb_t* pcb, uint8_t* dest, uint16_t len) {
+    return tcp_buf_pull(&pcb->rx_buf, dest, len);
 }
 
 // 服务端主动关闭连接

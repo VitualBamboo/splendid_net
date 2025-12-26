@@ -18,8 +18,8 @@ static void try_send_data(xtcp_pcb_t* pcb) {
         return; // 发完了
     }
 
-    // 将剩余的数据写入 TCP 缓冲区
-    int written = xtcp_write(pcb, tx_buffer + sent_len, remaining_len);
+    // 使用tcp发送剩余数据
+    int written = xtcp_send(pcb, tx_buffer + sent_len, remaining_len);
 
     // 更新进度条
     if (written > 0) {

@@ -106,8 +106,8 @@ xtcp_pcb_t* xtcp_pcb_find(xip_addr_t* remote_ip, uint16_t remote_port, uint16_t 
 xnet_status_t xtcp_pcb_listen(xtcp_pcb_t* pcb);
 xnet_status_t xtcp_pcb_close(xtcp_pcb_t* pcb);
 
-int xtcp_write(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len);
-int xtcp_read(xtcp_pcb_t* pcb, uint8_t* dest, uint16_t len);
+int xtcp_send(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len);
+int xtcp_recv(xtcp_pcb_t* pcb, uint8_t* dest, uint16_t len);
 
 
 #endif //XNET_TCP_H
