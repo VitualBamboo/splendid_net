@@ -103,7 +103,7 @@ static uint16_t tcp_buf_put(xtcp_buf_t* tcp_buf, uint8_t* src, uint16_t len) {
 
 static uint16_t tcp_recv(xtcp_pcb_t* pcb, uint8_t flags, uint8_t* src, uint16_t len) {
     // 1. 将收到的 payload 写入接收缓冲区 (rx_buf)
-    uint16_t read_len = tcp_buf_put(&pcb->rx_buf, src, len);
+    uint16_t read_len = tcp_buf_put(pcb->rx_buf, src, len);
 
     // 2. 累加 ACK 号，准备下次告诉对方我收到了多少
     pcb->rcv_nxt += read_len;
@@ -190,7 +190,7 @@ static void tcp_read_mss(xtcp_pcb_t* pcb, xtcp_hdr_t* tcp_hdr) {
 }
 // 通用发送数据方法
 static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
-    uint16_t payload_len = tcp_buf_wait_send_count(&pcb->tx_buf);
+    uint16_t payload_len = tcp_buf_wait_send_count(pcb->tx_buf);
     // SYN 包需要额外4字节的MSS选项空间
     uint16_t opt_len = (flags & XTCP_FLAG_SYN) ? 4 : 0;
 
@@ -215,7 +215,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
     tcp_hdr->hdr_flags.hdr_len = (opt_len + sizeof(xtcp_hdr_t)) / 4;
     tcp_hdr->hdr_flags.flags = flags;
     tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
-    tcp_hdr->window = swap_order16(tcp_buf_free_count(&pcb->rx_buf));
+    tcp_hdr->window = swap_order16(tcp_buf_free_count(pcb->rx_buf));
     tcp_hdr->checksum = 0;
     tcp_hdr->urgent_ptr = 0;
     if (flags & XTCP_FLAG_SYN) {
@@ -225,7 +225,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
         *(uint16_t*)(opt_data + 2) = swap_order16(XTCP_MSS_DEFAULT);
     }
     // 将pcb发送缓冲区的数据拷贝到packet
-    tcp_buf_peek(&pcb->tx_buf, packet->data + opt_len + sizeof(xtcp_hdr_t), payload_len);
+    tcp_buf_peek(pcb->tx_buf, packet->data + opt_len + sizeof(xtcp_hdr_t), payload_len);
 
     tcp_hdr->checksum = checksum_peso(&xnet_local_ip, &pcb->remote_ip, XNET_PROTOCOL_TCP,
                                      (uint16_t*)packet->data, packet->len);
@@ -236,7 +236,7 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t* pcb, uint8_t flags) {
 
     // 发送后，移动send_idx
     if (payload_len > 0) {
-        tcp_buf_advance_send(&pcb->tx_buf, payload_len);
+        tcp_buf_advance_send(pcb->tx_buf, payload_len);
     }
 
     pcb->remote_win -= payload_len;
@@ -261,9 +261,20 @@ static xtcp_pcb_t* xtcp_pcb_alloc_common(void) {
             // B. 状态初始化
             pcb->state = XTCP_STATE_CLOSED;
 
+            // 1. 为缓冲区指针动态分配内存
+            pcb->tx_buf = (xtcp_buf_t*)malloc(sizeof(xtcp_buf_t));
+            pcb->rx_buf = (xtcp_buf_t*)malloc(sizeof(xtcp_buf_t));
+
+            // 2. 如果分配失败（内存不足），必须回滚！
+            if (pcb->tx_buf == NULL || pcb->rx_buf == NULL) {
+                if (pcb->tx_buf) free(pcb->tx_buf);
+                if (pcb->rx_buf) free(pcb->rx_buf);
+                return NULL; // 告诉上层没抢到资源
+            }
+
             // C. 核心组件初始化 (这是之前 accept 里经常漏写的！)
-            tcp_buf_init(&pcb->tx_buf);
-            tcp_buf_init(&pcb->rx_buf);
+            tcp_buf_init(pcb->tx_buf);
+            tcp_buf_init(pcb->rx_buf);
 
             // D. 协议参数初始化 (出厂默认值)
             pcb->remote_mss = XTCP_MSS_DEFAULT;
@@ -307,11 +318,20 @@ static void xtcp_pcb_init(xtcp_pcb_t* pcb) {
     pcb->snd_una = pcb->snd_nxt;
 
     // 缓冲区初始化
-    tcp_buf_init(&pcb->tx_buf);
-    tcp_buf_init(&pcb->rx_buf);
+    tcp_buf_init(pcb->tx_buf);
+    tcp_buf_init(pcb->rx_buf);
 }
 
 static void tcp_pcb_free(xtcp_pcb_t* pcb) {
+    // 释放缓冲区内存
+    if (pcb->tx_buf) {
+        free(pcb->tx_buf);
+        pcb->tx_buf = NULL; //以此防止悬空指针
+    }
+    if (pcb->rx_buf) {
+        free(pcb->rx_buf);
+        pcb->rx_buf = NULL;
+    }
     pcb->state = XTCP_STATE_FREE;
 }
 
@@ -440,7 +460,7 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
                     uint16_t acked_len = tcp_hdr->ack - pcb->snd_una;
 
                     // 释放发送缓冲区空间 (这一步把 tail 指针前移了)
-                    tcp_buf_advance_ack(&pcb->tx_buf, acked_len);
+                    tcp_buf_advance_ack(pcb->tx_buf, acked_len);
                     pcb->snd_una += acked_len;
 
                     // 如果确实腾出了空间，且应用层注册了回调，就通知它
@@ -457,7 +477,7 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
             // 显式处理接收到的数据
             if (payload_len > 0) {
                 // 1. 直接调用 buffer 的 put 方法 (语义清晰：放入接收缓冲)
-                int written = tcp_buf_put(&pcb->rx_buf, packet->data, payload_len);
+                int written = tcp_buf_put(pcb->rx_buf, packet->data, payload_len);
 
                 // 2. 更新接收进度 (只加数据的长度)
                 pcb->rcv_nxt += written;
@@ -487,7 +507,7 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
                 // 必须回 ACK (可能带有 FIN 的 ACK，或者数据的 ACK)
                 // 如果刚好自己也有数据要发，tcp_send_segment 会自动带上 payload (捎带应答)
                 tcp_send_segment(pcb, XTCP_FLAG_ACK);
-            }else if (tcp_buf_wait_send_count(&pcb->tx_buf)) {
+            }else if (tcp_buf_wait_send_count(pcb->tx_buf)) {
                 // 虽然没收到新数据不需要立即 ACK，但我自己有数据要发
                 // 这种情况下也要发包 (ACK 标志也是必须带的)
                 tcp_send_segment(pcb, XTCP_FLAG_ACK);
@@ -606,7 +626,7 @@ int xtcp_send(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len) {
         return -1;
     }
     // 将数据拷贝到pcb->tx_buf，移动write_idx
-    uint16_t written = tcp_buf_put(&pcb->tx_buf, src, len);
+    uint16_t written = tcp_buf_put(pcb->tx_buf, src, len);
     if (written > 0) {
         tcp_send_segment(pcb, XTCP_FLAG_ACK); // 只要连接建立，每一次发送都要带ACK
     }
@@ -615,7 +635,7 @@ int xtcp_send(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len) {
 
 // 使用tcp接收数据
 int xtcp_recv(xtcp_pcb_t* pcb, uint8_t* dest, uint16_t len) {
-    int read_len = tcp_buf_pull(&pcb->rx_buf, dest, len);
+    int read_len = tcp_buf_pull(pcb->rx_buf, dest, len);
 
     // 【新增逻辑】窗口更新机制
     if (read_len > 0) {

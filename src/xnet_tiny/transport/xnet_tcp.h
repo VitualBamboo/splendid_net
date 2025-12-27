@@ -93,8 +93,8 @@ struct _xtcp_pcb_t {
     uint16_t               remote_mss;
     uint16_t               remote_win;
     xtcp_event_handler_t   event_cb;
-    xtcp_buf_t             tx_buf;
-    xtcp_buf_t             rx_buf;
+    xtcp_buf_t*            tx_buf;
+    xtcp_buf_t*            rx_buf;
 };
 
 void xtcp_init(void);
