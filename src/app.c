@@ -10,7 +10,7 @@ int main (void) {
     xnet_init();
 
     xserver_datetime_create(13);
-    xserver_http_create(80);
+    xhttp_server_create(80);
 
     // 打印 IP 和 MAC 地址
     printf("------------xnet running at %d.%d.%d.%d, MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
@@ -21,7 +21,7 @@ int main (void) {
 
     while (1) {
         xnet_poll();
-        xserver_http_run();
+        xhttp_server_poll();
     }
 
     return 0;

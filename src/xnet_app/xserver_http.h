@@ -7,7 +7,7 @@
 
 #include "xnet_def.h"
 
-xnet_status_t xserver_http_create(uint16_t port);
-void xserver_http_run(void);
+xnet_status_t xhttp_server_create(uint16_t port);
+void xhttp_server_poll(void);
 
 #endif //XSERVER_HTTP_H
