@@ -46,6 +46,7 @@ typedef enum _xnet_status_t {
     XNET_ERR_BINDED = -3,
     XNET_ERR_PARAM = -4,
     XNET_ERR_STATE = -5,
+    XNET_ERR_MEM = -6,
 } xnet_status_t;
 
 // 网络层协议类型

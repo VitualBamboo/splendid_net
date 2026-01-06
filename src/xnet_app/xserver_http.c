@@ -2,52 +2,56 @@
 #include <stdio.h>
 #include "xnet_tcp.h"
 
-// 准备 4096 字节的数据 (故意比 2048 缓冲区大)
-#define TEST_DATA_LEN 4096
-static uint8_t tx_buffer[TEST_DATA_LEN];
+// FIFO 队列长度，与 PCB 数量一致
+#define XHTTP_FIFO_SIZE XTCP_PCB_MAX_NUM
 
-// 记录发送进度的变量
-static int sent_len = 0;
+typedef struct _xhttp_fifo_t {
+    xtcp_pcb_t* clients[XHTTP_FIFO_SIZE];
+    uint8_t read_idx, write_idx;
+} xhttp_fifo_t;
 
-// 尝试发送数据
-static void try_send_data(xtcp_pcb_t* pcb) {
-    // 算出还剩多少没发
-    int remaining_len = TEST_DATA_LEN - sent_len;
+static xhttp_fifo_t http_fifo;
 
-    if (remaining_len <= 0) {
-        return; // 发完了
+static void xhttp_fifo_init(xhttp_fifo_t* fifo) {
+    fifo->write_idx = 0; //写指针，队尾
+    fifo->read_idx = 0;  //读指针，队头
+}
+
+static xnet_status_t xhttp_fifo_enqueue(xhttp_fifo_t* fifo, xtcp_pcb_t* pcb) {
+    // 1. 预判 tail 的下一步位置
+    int next_write = (fifo->write_idx + 1) % XHTTP_FIFO_SIZE;
+
+    // 2. 判满逻辑：如果下一步撞上了 read，说明只剩这一个保留空位了
+    // 此时队列里实际存了 SIZE-1 个元素，刚好对应所有可用的39个 PCB
+    if (next_write == fifo->read_idx) {
+        return XNET_ERR_MEM;
     }
 
-    // 使用tcp发送剩余数据
-    int written = xtcp_send(pcb, tx_buffer + sent_len, remaining_len);
+    fifo->clients[fifo->write_idx] = pcb;
+    fifo->write_idx = next_write; // 更新 tail
 
-    // 更新进度条
-    if (written > 0) {
-        sent_len += written;
-        printf(">> Progress: Sent %d bytes, Total: %d / %d\n", written, sent_len, TEST_DATA_LEN);
-    } else {
-        printf(">> Buffer full! Waiting for XTCP_EVENT_SENT...\n");
+    return XNET_OK;
+}
+
+static xtcp_pcb_t* xhttp_fifo_dequeue(xhttp_fifo_t* fifo) {
+    // 1. 判空逻辑：头尾重合就是空
+    if (fifo->read_idx == fifo->write_idx) {
+        return NULL;
     }
 
-    // 如果全部发完，可以考虑关闭连接（可选）
-    if (sent_len >= TEST_DATA_LEN) {
-        printf(">> All data sent successfully!\n");
-        // xtcp_pcb_close(pcb);
-    }
+    xtcp_pcb_t* client = fifo->clients[fifo->read_idx];
+    fifo->read_idx = (fifo->read_idx + 1) % XHTTP_FIFO_SIZE;
+
+    return client;
+}
+
+// [新增] 动态计算当前队列长度
+static int xhttp_fifo_count(xhttp_fifo_t* fifo) {
+    return (fifo->write_idx - fifo->read_idx + XHTTP_FIFO_SIZE) % XHTTP_FIFO_SIZE;
 }
 
 // 应用层回调方法
 static xnet_status_t http_handler(xtcp_pcb_t* pcb, xtcp_event_t event) {
-    // 初始化测试数据 "0123..."
-    static char num[] = "0123456789ABCDEF";
-    // 只初始化一次数据
-    static int data_inited = 0;
-    if (!data_inited) {
-        for (int i = 0; i < TEST_DATA_LEN; i++) {
-            tx_buffer[i] = num[i % 16];
-        }
-        data_inited = 1;
-    }
 
     switch (event) {
         case XTCP_EVENT_CONNECTED:
@@ -57,49 +61,14 @@ static xnet_status_t http_handler(xtcp_pcb_t* pcb, xtcp_event_t event) {
                pcb->remote_ip.addr[2],
                pcb->remote_ip.addr[3],
                pcb->remote_port);
-            /*
-            printf("http: client connected. Start sending %d bytes...\n", TEST_DATA_LEN);
-            sent_len = 0; // 【重置进度】非常重要！
-
-            // 连接刚建立，缓冲区肯定是空的，立刻尝试发第一波
-            try_send_data(pcb);
-            */
-
-            // xtcp_pcb_close(pcb);
+            xhttp_fifo_enqueue(&http_fifo, pcb);
+            printf("fifo queue length: %d\n", xhttp_fifo_count(&http_fifo));
             break;
 
         case XTCP_EVENT_SENT:
-            // 【核心】：收到这个事件，说明对方回 ACK 了，缓冲区有空位了
-            // 赶紧接着发剩下的！
-            // try_send_data(pcb);
             break;
 
         case XTCP_EVENT_DATA_RECEIVED:
-            uint8_t echo_buf[1024]; // 还是用安全的 1024 栈内存
-            int recv_len;
-
-            do {
-                // 1. 尝试读一桶
-                recv_len = xtcp_recv(pcb, echo_buf, sizeof(echo_buf));
-
-                // 2. 如果读到了数据，就处理（Echo）
-                if (recv_len > 0) {
-                    printf(">> [Recv] Chunk size: %d bytes\n", recv_len);
-
-                    // 尝试回显
-                    int written = xtcp_send(pcb, echo_buf, recv_len);
-
-                    if (written < recv_len) {
-                        // 注意：如果发送缓冲区满了，这里简单的 Echo 测试会丢弃剩余数据
-                        // 在生产环境中，需要把剩下的存起来下次发，但测试环境这样是可以的
-                        printf(">> [Warn] TX full, dropped %d bytes\n", recv_len - written);
-                    }
-                }
-
-                // 3. 【判断条件】只要读出来的长度等于缓冲区最大值，说明可能还有数据，继续读！
-                // 或者更简单：只要 recv_len > 0 就继续读
-            } while (recv_len > 0);
-
             break;
 
         case XTCP_EVENT_CLOSED:
@@ -121,5 +90,10 @@ xnet_status_t xserver_http_create(uint16_t port) {
     xtcp_pcb_t* pcb = xtcp_pcb_new(http_handler);
     xtcp_pcb_bind(pcb, port);
     xtcp_pcb_listen(pcb);
+    xhttp_fifo_init(&http_fifo);
     return XNET_OK;
+}
+
+void xserver_http_run(void) {
+
 }

@@ -8,5 +8,6 @@
 #include "xnet_def.h"
 
 xnet_status_t xserver_http_create(uint16_t port);
+void xserver_http_run(void);
 
 #endif //XSERVER_HTTP_H
