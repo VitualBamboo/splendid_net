@@ -1,236 +1,144 @@
 #include "xserver_http.h"
+#include "xsocket.h"   // <--- 只依赖 Socket，不依赖 xnet_tiny
 #include <stdio.h>
 #include <string.h>
 
-#include "xnet_tcp.h"
-#include "xnet_tiny.h"
+#define XHTTP_DOC_ROOT  "D:\\Develop\\IdeaProject\\Learning-DIY-TCPIP_WEB-master\\htdocs"
 
-// FIFO 队列长度，与 PCB 数量一致
-#define XHTTP_FIFO_SIZE XTCP_PCB_MAX_NUM
+static char xhttp_recv_buf[1024];
+static char xhttp_send_buf[1024];
+static char xhttp_req_path[255];
+static char xhttp_fs_path[255];
 
-#define XHTTP_DOC_PATH "D:\\Develop\\IdeaProject\\Learning-DIY-TCPIP_WEB-master\\htdocs"
+// 全局 Server Socket
+static xsocket_t* server_socket;
 
-static char xhttp_recv_buf[1024], xhttp_send_buf[1024];
-static char xhttp_req_path[255], xhttp_fs_path[255];
+// -------------------------------------------------------------------------
+// 辅助函数
+// -------------------------------------------------------------------------
 
-typedef struct _xhttp_fifo_t {
-    xtcp_pcb_t* pcbs[XHTTP_FIFO_SIZE];
-    uint8_t read_idx, write_idx;
-} xhttp_fifo_t;
-
-static xhttp_fifo_t http_fifo;
-
-static int xhttp_read_line(xtcp_pcb_t* pcb, char* buf, int size) {
+// 基于 Socket 的按行读取
+static int xhttp_read_line(xsocket_t* sock, char* buf, int max_len) {
     int i = 0;
-
-    while (i < size) {
+    while (i < max_len - 1) {
         char c;
+        // [阻塞] 读 1 个字节
+        int len = xsocket_read(sock, &c, 1);
+        if (len <= 0) break;
 
-        if (xtcp_recv(pcb, (uint8_t*)&c, 1) > 0) {
-            if ((c != '\r') && (c != '\n')) {
-                buf[i++] = c;
-            }
-            else if (c == '\n') {
-                break;
-            }
+        if (c != '\r' && c != '\n') {
+            buf[i++] = c;
+        } else if (c == '\n') {
+            break;
         }
-        xnet_poll();
     }
-
     buf[i] = '\0';
     return i;
 }
 
-static void xhttp_fifo_init(xhttp_fifo_t* fifo) {
-    fifo->write_idx = 0; //写指针，队尾
-    fifo->read_idx = 0;  //读指针，队头
-}
-
-static xnet_status_t xhttp_fifo_enqueue(xhttp_fifo_t* fifo, xtcp_pcb_t* pcb) {
-    // 1. 预判 tail 的下一步位置
-    int next_write = (fifo->write_idx + 1) % XHTTP_FIFO_SIZE;
-
-    // 2. 判满逻辑：如果下一步撞上了 read，说明只剩这一个保留空位了
-    // 此时队列里实际存了 SIZE-1 个元素，刚好对应所有可用的39个 PCB
-    if (next_write == fifo->read_idx) {
-        return XNET_ERR_MEM;
-    }
-
-    fifo->pcbs[fifo->write_idx] = pcb;
-    fifo->write_idx = next_write; // 更新 tail
-
-    return XNET_OK;
-}
-
-static xtcp_pcb_t* xhttp_fifo_dequeue(xhttp_fifo_t* fifo) {
-    // 1. 判空逻辑：头尾重合就是空
-    if (fifo->read_idx == fifo->write_idx) {
-        return NULL;
-    }
-
-    xtcp_pcb_t* pcb = fifo->pcbs[fifo->read_idx];
-    fifo->read_idx = (fifo->read_idx + 1) % XHTTP_FIFO_SIZE;
-
-    return pcb;
-}
-
-// 自动计算FIFO长度
-static int xhttp_fifo_count(xhttp_fifo_t* fifo) {
-    return (fifo->write_idx - fifo->read_idx + XHTTP_FIFO_SIZE) % XHTTP_FIFO_SIZE;
-}
-
-// 应用层回调方法
-static xnet_status_t xhttp_event_handler(xtcp_pcb_t* pcb, xtcp_event_t event) {
-
-    switch (event) {
-        case XTCP_EVENT_CONNECTED:
-            printf("http: new client connected from %d.%d.%d.%d:%d\n",
-               pcb->remote_ip.addr[0],
-               pcb->remote_ip.addr[1],
-               pcb->remote_ip.addr[2],
-               pcb->remote_ip.addr[3],
-               pcb->remote_port);
-            xhttp_fifo_enqueue(&http_fifo, pcb);
-            printf("fifo queue length: %d\n", xhttp_fifo_count(&http_fifo));
-            break;
-
-        case XTCP_EVENT_SENT:
-            break;
-
-        case XTCP_EVENT_DATA_RECEIVED:
-            break;
-
-        case XTCP_EVENT_CLOSED:
-            printf("http: connection closed from %d.%d.%d.%d:%d\n",
-                   pcb->remote_ip.addr[0],
-                   pcb->remote_ip.addr[1],
-                   pcb->remote_ip.addr[2],
-                   pcb->remote_ip.addr[3],
-                   pcb->remote_port);
-            break;
-
-        default:
-            break;
-    }
-    return XNET_OK;
-}
-
-static void xhttp_close(xtcp_pcb_t* pcb) {
-    xtcp_pcb_close(pcb);
-    printf("http closed.\n");
-}
-
-static int xhttp_send_all(xtcp_pcb_t* pcb, char* buf, int size) {
-    int sended_size = 0;
-    while (size > 0) {
-        // 调用底层写函数
-        int curr_size = xtcp_send(pcb, (uint8_t*)buf, (uint16_t)size);
-        if (curr_size < 0) return; // 发送异常则退出
-
-        size -= curr_size;
-        buf += curr_size;
-        sended_size += curr_size;
-        xnet_poll();
-    }
-    return sended_size;
-}
-
-static void xhttp_send_404(xtcp_pcb_t* tcp) {
+static void xhttp_send_404(xsocket_t* sock) {
     sprintf(xhttp_send_buf, "HTTP/1.0 404 NOT FOUND\r\n\r\n");
-    xhttp_send_all(tcp, xhttp_send_buf, strlen(xhttp_send_buf));
+    xsocket_write(sock, xhttp_send_buf, strlen(xhttp_send_buf));
 }
 
-// 发送文件逻辑
-static void xhttp_send_file(xtcp_pcb_t* pcb, const char* url) {
+static void xhttp_send_file(xsocket_t* sock, const char* url_path) {
     FILE* file;
-    uint32_t size;
+    uint32_t file_size;
 
-    // 处理路径：跳过开头的 '/'
-    while (*url == '/') url++;
-    sprintf(xhttp_fs_path, "%s/%s", XHTTP_DOC_PATH, url);
+    while (*url_path == '/') url_path++;
+    sprintf(xhttp_fs_path, "%s/%s", XHTTP_DOC_ROOT, url_path);
 
-    // 以二进制只读方式打开文件
     file = fopen(xhttp_fs_path, "rb");
     if (file == NULL) {
-        xhttp_send_404(pcb);
+        xhttp_send_404(sock);
         return;
     }
 
-    // 获取文件大小
     fseek(file, 0, SEEK_END);
-    size = ftell(file);
+    file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    // 构造响应头
     sprintf(xhttp_send_buf,
         "HTTP/1.0 200 OK\r\n"
-        "Content-Length:%d\r\n"
+        "Server: XSocket-Http/1.0\r\n"
+        "Content-Length: %d\r\n"
         "\r\n",
-        size
+        file_size
     );
-    xhttp_send_all(pcb, xhttp_send_buf, strlen(xhttp_send_buf));
+    xsocket_write(sock, xhttp_send_buf, strlen(xhttp_send_buf));
 
-    // 循环读取文件内容并发送
     while (!feof(file)) {
-        size = fread(xhttp_send_buf, 1, sizeof(xhttp_send_buf), file);
-        if (xhttp_send_all(pcb, xhttp_send_buf, size) < 0) {
-            fclose(file); // 异常退出前关闭文件
-            return;
+        size_t read_len = fread(xhttp_send_buf, 1, sizeof(xhttp_send_buf), file);
+        if (read_len > 0) {
+            xsocket_write(sock, xhttp_send_buf, (int)read_len);
         }
     }
-
-    // 完成后关闭文件
     fclose(file);
 }
 
+// -------------------------------------------------------------------------
+// 业务逻辑
+// -------------------------------------------------------------------------
+
+static void xhttp_handle_client(xsocket_t* client) {
+    // 1. 读取请求行
+    if (xhttp_read_line(client, xhttp_recv_buf, sizeof(xhttp_recv_buf)) <= 0) {
+        return;
+    }
+
+    // 2. 校验 GET
+    if (strncmp(xhttp_recv_buf, "GET", 3) != 0) {
+        return;
+    }
+
+    // 3. 解析路径
+    char* c = xhttp_recv_buf;
+    while (*c != ' ') c++;
+    while (*c == ' ') c++;
+
+    int i;
+    for (i = 0; i < sizeof(xhttp_req_path) - 1; i++) {
+        if (*c == ' ' || *c == '\0') break;
+        xhttp_req_path[i] = *c++;
+    }
+    xhttp_req_path[i] = '\0';
+
+    if (xhttp_req_path[strlen(xhttp_req_path) - 1] == '/') {
+        strcat(xhttp_req_path, "index.html");
+    }
+
+    // 4. 发送文件
+    printf("http: request %s\n", xhttp_req_path);
+    xhttp_send_file(client, xhttp_req_path);
+}
+
+// -------------------------------------------------------------------------
+// 对外接口
+// -------------------------------------------------------------------------
+
 xnet_status_t xhttp_server_create(uint16_t port) {
-    xtcp_pcb_t* server = xtcp_pcb_new(xhttp_event_handler);
-    xtcp_pcb_bind(server, port);
-    xtcp_pcb_listen(server);
-    xhttp_fifo_init(&http_fifo);
+    // 现在的 Create 只负责创建 Socket，不涉及具体的 PCB 回调
+    server_socket = xsocket_open();
+    if (!server_socket) return XNET_ERR_MEM;
+
+    xsocket_bind(server_socket, port);
+    xsocket_listen(server_socket);
+
     return XNET_OK;
 }
 
 void xhttp_server_poll(void) {
-    xtcp_pcb_t* pcb;
+    // [关键] 这里变成了 accept。
+    // 因为 xsocket_accept 内部有 xnet_poll() 循环，
+    // 所以程序运行到这里时，会自动驱动协议栈，直到有客户端连上来。
 
-    // 每次只从队列里取出一个连接进行处理，处理完这一个就退出函数，让CPU雨露均沾
-    if ((pcb = xhttp_fifo_dequeue(&http_fifo)) != NULL) {
-        int i;
-        char* c = xhttp_recv_buf;
+    xsocket_t* client = xsocket_accept(server_socket);
 
-        // 读取请求行
-        if (xhttp_read_line(pcb, xhttp_recv_buf, sizeof(xhttp_recv_buf)) < 0) {
-            xhttp_close(pcb);
-            return;
-        }
+    if (client) {
+        // 有人连上来了！像写 Java 一样处理它
+        xhttp_handle_client(client);
 
-        // 检查是否为 GET 请求
-        if (strncmp(xhttp_recv_buf, "GET", 3) != 0) {
-            xhttp_close(pcb);
-            return;
-        }
-
-        // 跳过 "GET" 之后的空格
-        while (*c != ' ') c++;
-        while (*c == ' ') c++;
-
-        // 提取 URL 路径到 url_path 数组
-        for (i = 0; i < sizeof(xhttp_req_path); i++) {
-            if (*c == ' ') break;
-            xhttp_req_path[i] = *c++;
-        }
-        xhttp_req_path[i] = '\0';
-
-        // 如果路径以 '/' 结尾，自动追加 "index.html"
-        if (xhttp_req_path[strlen(xhttp_req_path) - 1] == '/') {
-            strcat(xhttp_req_path, "index.html");
-        }
-
-        // 发送文件
-        xhttp_send_file(pcb, xhttp_req_path);
-
-        // 关闭连接
-        xhttp_close(pcb);
+        // 处理完，关闭连接
+        xsocket_close(client);
     }
 }

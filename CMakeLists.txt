@@ -36,10 +36,8 @@ else()
     add_compile_definitions(ALLOW_EXPERIMENTAL_API)
 endif()
 
-# 2. 添加子模块
-add_subdirectory(src/xnet_tiny)
-add_subdirectory(src/xnet_app)
-# 注意：一定要放在 xnet_port 之前，因为 xnet_port 要用它
+# 2. 添加子模块 (注意顺序：底层 -> 上层)
+# A. 驱动层
 if(WIN32)
     # 注册 pcap 驱动库！
     add_subdirectory(src/drivers/pcap)
@@ -47,7 +45,16 @@ else()
     # 注册 Linux 的驱动库！
     add_subdirectory(src/drivers/dpdk)
 endif()
+# B. 适配层 & 协议核心
 add_subdirectory(src/xnet_port)
+add_subdirectory(src/xnet_tiny)
+
+# C. 系统调用层 (Socket)
+add_subdirectory(src/xnet_socket)
+
+# D. 应用层
+# 它依赖 Socket，所以放在最后
+add_subdirectory(src/xnet_app)
 
 # =======================================================
 # 3. 生成可执行文件
@@ -60,14 +67,16 @@ add_executable(${PROJECT_NAME} src/app.c)
 # 因为用了 OBJECT 库，这里把所有模块串起来
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
-            xnet_app      # 业务层
-            xnet_tiny     # 协议层
-            xnet_port     # 驱动层
-            Npcap::SDK    # 外部依赖
+            xnet_app      # 1. 应用
+            xnet_socket   # 2. Socket 接口
+            xnet_tiny     # 3. 协议栈
+            xnet_port     # 4. 端口适配
+            Npcap::SDK    # 5. 驱动依赖
     )
 else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
             xnet_app
+            xnet_socket
             xnet_tiny
             xnet_port
             DPDK::SDK

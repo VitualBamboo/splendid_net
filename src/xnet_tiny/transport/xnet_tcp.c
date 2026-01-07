@@ -13,6 +13,37 @@
 // pcb数组，程序启动自动创建，属性全部为0
 static xtcp_pcb_t tcp_pcb_pool[XTCP_PCB_MAX_NUM];
 
+// ===== accept queue helpers (listener-owned, lwIP-like) =====
+
+static void xtcp_acceptq_push(xtcp_pcb_t* listen, xtcp_pcb_t* child) {
+    child->accept_next = NULL;
+
+    if (listen->accept_head == NULL) {
+        listen->accept_head = child;
+        listen->accept_tail = child;
+    } else {
+        listen->accept_tail->accept_next = child;
+        listen->accept_tail = child;
+    }
+
+    listen->accept_cnt++;
+}
+
+static xtcp_pcb_t* xtcp_acceptq_pop(xtcp_pcb_t* listen) {
+    xtcp_pcb_t* child = listen->accept_head;
+    if (!child) return NULL;
+
+    listen->accept_head = child->accept_next;
+    if (listen->accept_head == NULL) {
+        listen->accept_tail = NULL;
+    }
+
+    child->accept_next = NULL;
+    listen->accept_cnt--;
+    return child;
+}
+
+
 // 计算两个指针之间的距离
 static uint16_t tcp_buf_dist(uint16_t from, uint16_t to) {
     // from是数据的开始，to是数据的结束
@@ -353,6 +384,7 @@ static void xtcp_listen_input(xtcp_pcb_t* listen_pcb, xip_addr_t* remote_ip, xtc
     // 2.1 继承“父业”
     child_pcb->event_cb = listen_pcb->event_cb;   // 继承回调
     child_pcb->local_port = listen_pcb->local_port; // 继承端口
+    child_pcb->listener = listen_pcb;   // ✅ 记录父 LISTEN pcb（S方案关键）
 
     // 2.2 录入“客人”信息
     child_pcb->state = XTCP_STATE_SYN_RECVD;      // 状态跃迁
@@ -438,15 +470,33 @@ void xtcp_in(xip_addr_t* remote_ip, xnet_packet_t* packet) {
     uint16_t payload_len = packet->len; // 剥离头后，这就是数据长度
     switch (pcb->state) {
         case XTCP_STATE_SYN_RECVD:
-            // 作为服务端，收到收到第三次握手
             if (flags & XTCP_FLAG_ACK) {
-                // 确保对方确认的是我发的那个 SYN
+                // 第三次握手 ACK 必须确认到我发出的 SYN+ACK（snd_nxt 已在 tcp_send_segment 里 +1）
                 if (tcp_hdr->ack == pcb->snd_nxt) {
-                    pcb->snd_una++; // 滑动窗口，确认第二次握手的请求，已收到
+
+                    pcb->snd_una++;  // 确认 SYN 已被对方确认
                     pcb->state = XTCP_STATE_ESTABLISHED;
-                    pcb->event_cb(pcb, XTCP_EVENT_CONNECTED); // 通知应用层
-                } else {
-                    // ACK 号不对？可能是旧包，或者是攻击，忽略或发 RST
+
+                    // ✅ 入队到父 listener 的 accept 队列（而不是全局队列）
+                    xtcp_pcb_t* listen = pcb->listener;
+                    if (listen && listen->state == XTCP_STATE_LISTEN) {
+                        if (listen->accept_cnt < listen->backlog) {
+                            xtcp_acceptq_push(listen, pcb);
+
+                            // （可选）通知：有新连接可 accept
+                            // 注意：回调仍然传 child pcb，语义是“这个连接已就绪”
+                            if (listen->event_cb) {
+                                listen->event_cb(pcb, XTCP_EVENT_CONNECTED);
+                            }
+                        } else {
+                            // backlog 满：直接拒绝（RST 或 close 都行，这里用 RST 更干脆）
+                            tcp_send_reset(pcb->rcv_nxt, pcb->local_port, &pcb->remote_ip, pcb->remote_port);
+                            tcp_pcb_free(pcb);
+                        }
+                    } else {
+                        // 没有 listener（异常）就回收
+                        tcp_pcb_free(pcb);
+                    }
                 }
             }
             break;
@@ -608,17 +658,24 @@ xtcp_pcb_t* xtcp_pcb_find(xip_addr_t* remote_ip, uint16_t remote_port, uint16_t 
 xnet_status_t xtcp_pcb_listen(xtcp_pcb_t* pcb) {
     if (pcb == NULL) return XNET_ERR_PARAM;
 
-    // 只有处于 CLOSED 状态且已绑定端口的 pcb 才能开始 Listen
     if (pcb->state != XTCP_STATE_CLOSED) {
-         return XNET_ERR_STATE;
+        return XNET_ERR_STATE;
     }
     if (pcb->local_port == 0) {
         return XNET_ERR_PARAM;
     }
 
     pcb->state = XTCP_STATE_LISTEN;
+
+    // ===== accept queue init =====
+    pcb->accept_head = NULL;
+    pcb->accept_tail = NULL;
+    pcb->accept_cnt  = 0;
+    pcb->backlog     = 10;   // 先写死，下一步我们再跟 XSOCKET_BACKLOG 打通
+
     return XNET_OK;
 }
+
 
 // 使用tcp发送数据
 int xtcp_send(xtcp_pcb_t* pcb, uint8_t* src, uint16_t len) {
@@ -662,4 +719,11 @@ xnet_status_t xtcp_pcb_close(xtcp_pcb_t* pcb) {
         tcp_pcb_free(pcb);
     }
     return XNET_OK;
+}
+
+xtcp_pcb_t* xtcp_accept(xtcp_pcb_t* listen_pcb) {
+    if (!listen_pcb || listen_pcb->state != XTCP_STATE_LISTEN) {
+        return NULL;
+    }
+    return xtcp_acceptq_pop(listen_pcb);
 }

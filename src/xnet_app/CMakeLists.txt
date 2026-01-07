@@ -1,3 +1,5 @@
+# src/xnet_app/CMakeLists.txt
+
 set(APP_SRCS
         xserver_datetime.c
         xserver_http.c
@@ -10,5 +12,5 @@ target_include_directories(xnet_app
         ${CMAKE_CURRENT_SOURCE_DIR}
         PRIVATE
         ${PROJECT_SOURCE_DIR}/src/xnet_tiny/core
-        ${PROJECT_SOURCE_DIR}/src/xnet_tiny/transport
+        ${PROJECT_SOURCE_DIR}/src/xnet_socket
 )
