@@ -25,3 +25,27 @@ target_link_libraries(xnet_socket PRIVATE
         xnet_tiny   # 协议栈核心
         xnet_port   # 适配层 (它会自动带入 driver_pcap 或 driver_dpdk)
 )
+
+# =======================================================
+# 🚀 核心修改：强制静态链接 (使用 target_link_libraries)
+# =======================================================
+if(WIN32)
+    target_link_libraries(xnet_socket PRIVATE
+            # A. 基础运行时强制静态
+            -static-libgcc
+            -static-libstdc++
+
+            # B. 【关键】开启静态链接模式
+            # 告诉链接器：从这里开始，遇到的库都要找 .a (静态库)，不要找 .dll.a
+            -Wl,-Bstatic
+
+            # C. 指定要“吃进去”的库
+            -lstdc++
+            -lwinpthread   # 这就是那个必须吃进去的线程库
+
+            # D. 【关键】恢复动态链接模式
+            # 必须恢复！因为后面的 kernel32, user32, ws2_32 等系统库只有动态版
+            # 如果不恢复，链接系统库时会报错
+            -Wl,-Bdynamic
+    )
+endif()
