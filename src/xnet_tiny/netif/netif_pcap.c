@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include "pcap_device.h"
 #include "xnet_tiny.h"
-#include "xnet_driver.h"
+#include "xnet_netif.h"
 
 static pcap_t* pcap;
 

@@ -6,7 +6,7 @@
 #include "xnet_arp.h"
 #include "xnet_ip.h"
 #include <string.h>
-#include "xnet_driver.h"
+#include "xnet_netif.h"
 
 
 #define XARP_HW_ETHER               0x1         // 以太网

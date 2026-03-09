@@ -59,7 +59,6 @@ else()
     add_subdirectory(src/drivers/dpdk)
 endif()
 
-add_subdirectory(src/xnet_port)
 add_subdirectory(src/xnet_tiny)
 add_subdirectory(src/xnet_socket)
 add_subdirectory(src/xnet_app)
@@ -70,10 +69,10 @@ add_subdirectory(src/xnet_app)
 if(TARGET xnet_socket)
     if(WIN32)
         # Windows下：把 Npcap 驱动和核心协议栈绑进 DLL
-        target_link_libraries(xnet_socket PRIVATE xnet_tiny xnet_port Npcap::SDK)
+        target_link_libraries(xnet_socket PRIVATE xnet_tiny xnet_netif Npcap::SDK)
     else()
         # Linux下：把 DPDK 驱动和核心协议栈绑进 SO
-        target_link_libraries(xnet_socket PRIVATE xnet_tiny xnet_port DPDK::SDK)
+        target_link_libraries(xnet_socket PRIVATE xnet_tiny xnet_netif DPDK::SDK)
     endif()
 endif()
 
@@ -94,10 +93,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE
-            xnet_app xnet_tiny xnet_port Npcap::SDK
+            xnet_app xnet_tiny xnet_netif Npcap::SDK
     )
 else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
-            xnet_app xnet_tiny xnet_port DPDK::SDK
+            xnet_app xnet_tiny xnet_netif DPDK::SDK
     )
 endif()
