@@ -11,7 +11,13 @@ void xicmp_init(void) {
 
 }
 
-// 正常响应ICMP请求
+/**
+ * 响应 ICMP 请求
+ * @param icmp_hdr
+ * @param src_ip
+ * @param packet
+ * @return
+ */
 static xnet_status_t reply_icmp_request(xicmp_hdr_t *icmp_hdr, xip_addr_t *src_ip, xnet_packet_t *packet) {
     // 构建ICMP回复包
     xnet_packet_t *reply_packet = xnet_alloc_tx_packet(packet->len);
@@ -45,7 +51,7 @@ void xicmp_in(xip_addr_t *src_ip, xnet_packet_t *packet) {
     }
 }
 
-// 异常响应ICMP请求
+
 xnet_status_t xicmp_dest_unreach(uint8_t code, xip_hdr_t *ip_hdr) {
     xnet_packet_t *packet;
     xicmp_hdr_t *icmp_hdr;
