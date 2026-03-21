@@ -3,7 +3,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#define XHTTP_DOC_ROOT  "D:\\Develop\\IdeaProject\\Learning-DIY-TCPIP_WEB-master\\htdocs"
+#if defined(_WIN32) || defined(_WIN64)
+    // Windows 环境下的路径
+    #define XHTTP_DOC_ROOT  "D:\\Develop\\IdeaProject\\Learning-DIY-TCPIP_WEB-master\\htdocs"
+#else
+    // Linux 环境下的路径 (假设你把它放在工程根目录下的 htdocs 文件夹里)
+    #define XHTTP_DOC_ROOT  "/home/efairy520/splendid_net/htdocs"
+#endif
 
 static char xhttp_recv_buf[1024];
 static char xhttp_send_buf[1024];
