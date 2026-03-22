@@ -72,7 +72,7 @@ elseif(XNET_ENV STREQUAL "ubuntu")
 
 elseif(XNET_ENV STREQUAL "debian")
     # --- Linux TAP 配置 ---
-    set(ENV_LOCAL_IP "192, 168, 56, 201")
+    set(ENV_LOCAL_IP "192, 168, 66, 201")
 
     # TAP 驱动不需要外挂第三方库，直接使用 Linux 内核 API
     set(DRIVER_TARGET "")
