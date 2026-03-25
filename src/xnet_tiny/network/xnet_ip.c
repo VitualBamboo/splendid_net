@@ -94,8 +94,10 @@ void xip_in(xnet_packet_t *packet) {
         truncate_packet(packet, ip_total_len);
     }
 
-    // 只处理目标IP为自己的数据包，其它广播之类的IP全部丢掉
-    if (!xip_addr_eq(xnet_local_ip.addr, ip_hdr->dest_ip)) {
+    // 如果目标 IP 既不是我自己的 IP，也不是全局广播地址 255.255.255.255，那才丢弃它
+    uint8_t broadcast_ip[] = {255, 255, 255, 255};
+    if (!xip_addr_eq(xnet_local_ip.addr, ip_hdr->dest_ip) &&
+        !xip_addr_eq(ip_hdr->dest_ip, broadcast_ip)) {
         return;
     }
     xip_addr_t src_ip;
@@ -140,6 +142,16 @@ static xnet_status_t resolve_and_send(xip_addr_t *dest_ip, xnet_packet_t *packet
     xnet_status_t status;
     uint8_t *mac_addr;
 
+    // 1. 判断是否为全局广播地址 255.255.255.255
+    uint8_t broadcast_ip[] = {255, 255, 255, 255};
+    uint8_t broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+    if (xip_addr_eq(dest_ip->addr, broadcast_ip)) {
+        // 直接发送，无需ARP
+        return ethernet_out_to(XNET_PROTOCOL_IP, broadcast_mac, packet);
+    }
+
+    // 2. 普通平民通道：走正常的 ARP 解析流程
     if ((status = xarp_resolve(dest_ip, &mac_addr)) == XNET_OK) {
         return ethernet_out_to(XNET_PROTOCOL_IP, mac_addr, packet);
     }
