@@ -2,6 +2,7 @@
 #include "xnet_udp.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 // 引入协议栈的本机 MAC 地址
 extern uint8_t xnet_local_mac[XNET_MAC_ADDR_SIZE];
