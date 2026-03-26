@@ -1,6 +1,7 @@
 ﻿/**
  * 协议栈 ↔ 网卡 适配层
  */
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <stdlib.h>
@@ -9,18 +10,6 @@
 #include "xnet_netif.h"
 
 static pcap_t* pcap;
-
-/**
- * pcap 所用的真实网卡，物理网卡
- * 一般为主机 ip 地址
- */
-#ifdef _WIN32
-    // Windows 主机 IP
-    const char *ip_str = "192.168.189.1";
-#else
-    // Linux 主机没有 IP，56网卡被DPDK独占（下面的属性不使用）
-    const char *ip_str = "192.168.56.200";
-#endif
 
 /**
  * 协议栈虚拟 mac
@@ -35,8 +24,19 @@ const char default_mac_addr[] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
 xnet_status_t xnet_netif_open(uint8_t* mac_addr) {
     printf(">> [System Info] Initializing Driver: Windows Pcap\n");
     memcpy(mac_addr, default_mac_addr, sizeof(default_mac_addr));
-    pcap = pcap_device_open(ip_str, mac_addr, 1);
+
+    // 🌟 核心修复：将底层数据结构转换为网卡查找所需的字符串
+    char target_ip_str[16];
+    sprintf(target_ip_str, "%d.%d.%d.%d",
+            xnet_local_ip.addr[0], xnet_local_ip.addr[1],
+            xnet_local_ip.addr[2], xnet_local_ip.addr[3]);
+
+    // 打印出来确认一下
+    printf(">> [Driver] Passing IP to PCAP locator: %s\n", target_ip_str);
+
+    pcap = pcap_device_open(target_ip_str, mac_addr, 1);
     if (pcap == (pcap_t*) 0) {
+        printf(">> [Driver Error] Failed to open network device.\n");
         exit(-1);
     }
     return XNET_OK;

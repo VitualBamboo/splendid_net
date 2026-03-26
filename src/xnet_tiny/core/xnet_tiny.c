@@ -68,6 +68,7 @@ xnet_packet_t *xnet_alloc_rx_packet(uint16_t size) {
  * 协议栈的初始化
  */
 void xnet_init(void) {
+    xsys_init();
     ethernet_init();
     xarp_init();
     xip_init();

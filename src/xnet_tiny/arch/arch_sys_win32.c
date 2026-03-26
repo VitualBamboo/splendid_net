@@ -11,3 +11,12 @@ xnet_time_t xsys_get_time(void) {
     // 除以 1000 转换为协议栈需要的“秒”
     return (xnet_time_t)(GetTickCount64() / 1000);
 }
+
+// 封装一个系统级初始化函数
+void xsys_init(void) {
+    // 1. 强制控制台使用 UTF-8，彻底解决乱码
+    SetConsoleOutputCP(CP_UTF8);
+
+    // 2. 如果你以后需要初始化 Winsock 环境 (WSAStartup)，也全放在这里
+    // ...
+}

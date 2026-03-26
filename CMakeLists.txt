@@ -36,6 +36,7 @@ message(STATUS "========== 🚀 XNET TARGET ENV: ${XNET_ENV} ==========")
 
 if(XNET_ENV STREQUAL "windows")
     # --- Windows Npcap 配置 ---
+    add_compile_definitions(ENV_WIN_PCAP)
     set(NPCAP_SDK_DIR "C:/Users/efair/Downloads/npcap-sdk-1.15")
 
     add_library(Npcap::SDK UNKNOWN IMPORTED)
@@ -50,6 +51,7 @@ if(XNET_ENV STREQUAL "windows")
 
 elseif(XNET_ENV STREQUAL "ubuntu")
     # --- Linux DPDK 配置 ---
+    add_compile_definitions(ENV_UBUNTU_DPDK)
 
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(DPDK REQUIRED libdpdk)
@@ -70,6 +72,7 @@ elseif(XNET_ENV STREQUAL "ubuntu")
 
 elseif(XNET_ENV STREQUAL "debian")
     # --- Linux TAP 配置 ---
+    add_compile_definitions(ENV_DEBIAN_TAP)
 
     # TAP 驱动不需要外挂第三方库，直接使用 Linux 内核 API
     set(DRIVER_TARGET "")
@@ -108,7 +111,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_tiny/transport
         ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_socket
         ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_app
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_tiny/link
         ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_tiny/app
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_tiny/network
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/xnet_tiny/netif
 )
 
 # 统一绑定：无需再写 if/else，自动链接对应环境的驱动库

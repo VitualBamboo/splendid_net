@@ -14,3 +14,8 @@ xnet_time_t xsys_get_time(void) {
 
     return (xnet_time_t)ts.tv_sec;
 }
+
+// 封装一个系统级初始化函数
+void xsys_init(void) {
+    // 留空即可，因为 Linux 终端天然支持 UTF-8
+}

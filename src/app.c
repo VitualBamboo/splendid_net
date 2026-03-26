@@ -1,17 +1,42 @@
 #include <stdio.h>
-
+#include <string.h>
+#include "xnet_arp.h"
 #include "xnet_tiny.h"
 #include "xserver_http.h"
 #include "xserver_datetime.h"
 #include "xnet_dhcp.h"
+#include "xnet_config.h"
+#include "xnet_ethernet.h"
 
 int main (void) {
     // 1. 禁用标准输出缓冲，确保 printf 能即时打印到控制台
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    // 2. 初始化协议栈核心 (内存池、ARP表等)
+    // 是否使用静态IP
+    if (XNET_CFG_USE_STATIC_IP) {
+        uint8_t ip[]   = CFG_IP_ADDR;
+        uint8_t mask[] = CFG_IP_MASK;
+        uint8_t gw[]   = CFG_IP_GW;
+
+        // 读取配置文件中的静态IP
+        memcpy(xnet_local_ip.addr, ip, 4);
+        memcpy(xnet_netmask.addr, mask, 4);
+        memcpy(xnet_gateway.addr, gw, 4);
+        printf(">> [Network] Static IP Pre-configured: %d.%d.%d.%d\n", ip[0], ip[1], ip[2], ip[3]);
+    }
+
+    // 2. 初始化协议栈
     xnet_init();
-    xnet_dhcp_init();
+    printf("xnet stack initialized.\n");
+
+    // 如果是静态 IP，补发无偿 ARP
+    if (XNET_CFG_USE_STATIC_IP) {
+        xarp_make_request(&xnet_local_ip); // 向网段宣告自己
+        printf(">> [Network] Gratuitous ARP sent.\n");
+    } else {
+        xnet_dhcp_init();
+        printf(">> [Network] DHCP Mode Enabled. Searching...\n");
+    }
 
     printf("xnet stack initialized.\n");
 

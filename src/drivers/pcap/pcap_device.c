@@ -101,101 +101,60 @@ static int load_pcap_lib() {
 // 因为它们与 DLL 加载方式无关，只依赖于 pcap 库的 API。
 
 /**
- * 找到指定IP地址的网卡名
- * @param ip 物理网卡或者由虚拟软件生成的虚拟刚卡, 字符串形式，如"192.168.1.1"
- * @param name_buf 找到的对应网卡名称
+ * 找到指定IP地址的网卡名 (支持精确匹配和网段匹配)
  */
 static int pcap_find_device(const char *ip, char *name_buf) {
     char err_buf[PCAP_ERRBUF_SIZE];
     pcap_if_t *pcap_if_list = NULL;
     struct in_addr dest_ip;
-    pcap_if_t *item;
 
     inet_pton(AF_INET, ip, &dest_ip);
 
-    int err = pcap_findalldevs(&pcap_if_list, err_buf);
-    if (err < 0) {
-        pcap_freealldevs(pcap_if_list);
+    if (pcap_findalldevs(&pcap_if_list, err_buf) < 0) {
+        fprintf(stderr, ">> [PCAP Error] 获取系统网卡列表失败: %s\n", err_buf);
         return -1;
     }
 
-    for (item = pcap_if_list; item != NULL; item = item->next) {
-        if (item->addresses == NULL) {
-            continue;
-        }
+    printf("\n========== 🔍 正在扫描系统物理/虚拟网卡 ==========\n");
+    printf(">> 协议栈期望绑定的目标 IP 或网段: %s\n", ip);
+
+    for (pcap_if_t *item = pcap_if_list; item != NULL; item = item->next) {
+        if (item->addresses == NULL) continue;
 
         for (struct pcap_addr *pcap_addr = item->addresses; pcap_addr != NULL; pcap_addr = pcap_addr->next) {
-            struct sockaddr_in *curr_addr;
-            struct sockaddr *sock_addr = pcap_addr->addr;
+            if (pcap_addr->addr->sa_family != AF_INET) continue;
 
-            if (sock_addr->sa_family != AF_INET) {
-                continue;
-            }
+            struct sockaddr_in *curr_addr = (struct sockaddr_in *)pcap_addr->addr;
+            struct sockaddr_in *curr_mask = (struct sockaddr_in *)pcap_addr->netmask;
 
-            curr_addr = ((struct sockaddr_in*)sock_addr);
-            if (curr_addr->sin_addr.s_addr == dest_ip.s_addr) {
+            char ip_str[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &curr_addr->sin_addr, ip_str, sizeof(ip_str));
+
+            // 如果网卡没有掩码，默认使用 24 位掩码
+            uint32_t mask = curr_mask ? curr_mask->sin_addr.s_addr : 0x00FFFFFF;
+
+            printf("  - 发现网卡: [%s] IP: %s\n",
+                   item->description ? item->description : item->name, ip_str);
+
+            // 🌟 核心魔法：网段匹配！
+            // 条件1: 完全相等 (匹配宿主机自身的IP)
+            // 条件2: 网段相等 (IP & 掩码 == 目标IP & 掩码)
+            if ((curr_addr->sin_addr.s_addr == dest_ip.s_addr) ||
+                ((curr_addr->sin_addr.s_addr & mask) == (dest_ip.s_addr & mask))) {
+
+                printf("  ✅ 成功匹配！决定使用该网卡进行底层抓包。\n");
                 strcpy(name_buf, item->name);
                 pcap_freealldevs(pcap_if_list);
+                printf("==================================================\n\n");
                 return 0;
             }
         }
     }
 
+    printf("❌ 未找到任何与 %s 属于同一网段的网卡！\n", ip);
+    printf("==================================================\n\n");
     pcap_freealldevs(pcap_if_list);
     return -1;
-}
-
-/*
- * 显示所有的网络接口列表
- */
-static int pcap_show_list(void) {
-    char err_buf[PCAP_ERRBUF_SIZE];
-    pcap_if_t *pcapif_list = NULL;
-    int count = 0;
-
-    // 查找所有的网络接口
-    int err = pcap_findalldevs(&pcapif_list, err_buf);
-    if (err < 0) {
-        fprintf(stderr, "pcap_show_list: find all net list failed:%s\n", err_buf);
-        pcap_freealldevs(pcapif_list);
-        return -1;
-    }
-
-    printf("pcap_show_list: card list\n");
-
-    // 遍历所有的可用接口，输出其信息
-    for (pcap_if_t *item = pcapif_list; item != NULL; item = item->next) {
-        if (item->addresses == NULL) {
-            continue;
-        }
-
-        for (struct pcap_addr *pcap_addr = item->addresses; pcap_addr != NULL; pcap_addr = pcap_addr->next) {
-            char str[INET_ADDRSTRLEN];
-            struct sockaddr_in *ip_addr;
-
-            struct sockaddr *sockaddr = pcap_addr->addr;
-            if (sockaddr->sa_family != AF_INET) {
-                continue;
-            }
-
-            ip_addr = (struct sockaddr_in*)sockaddr;
-            printf("card %d: IP:%s name: %s, \n\n",
-                count++,
-                item->description == NULL ? "" : item->description,
-                inet_ntop(AF_INET, &ip_addr->sin_addr, str, sizeof(str))
-            );
-            break;
-        }
-    }
-
-    pcap_freealldevs(pcapif_list);
-
-    if ((pcapif_list == NULL) || (count == 0)) {
-        fprintf(stderr, "pcap_show_list: no available card!\n");
-        return -1;
-    }
-
-    return 0;
 }
 
 /**
@@ -219,7 +178,6 @@ pcap_t *pcap_device_open(const char *ip, const uint8_t *mac_addr, uint8_t poll_m
 
     if (pcap_find_device(ip, name_buf) < 0) {
         fprintf(stderr, "pcap_open: no net card has ip: %s, use the following:\n", ip);
-        pcap_show_list();
         return (pcap_t*)0;
     }
 
@@ -305,7 +263,6 @@ pcap_t *pcap_device_open(const char *ip, const uint8_t *mac_addr, uint8_t poll_m
 void pcap_device_close(pcap_t *pcap) {
     if (pcap == (pcap_t *)0) {
         fprintf(stderr, "pcap = 0");
-        pcap_show_list();
         return;
     }
     pcap_close(pcap);

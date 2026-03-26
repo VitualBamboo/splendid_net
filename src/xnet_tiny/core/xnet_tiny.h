@@ -47,6 +47,8 @@ void xnet_poll(void);
  */
 xnet_time_t xsys_get_time(void);
 
+void xsys_init(void);
+
 /**
  * @brief 检查是否超时 (协议栈全局通用)
  * @param last_time 记录上次时间的变量指针
