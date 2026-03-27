@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(splendid_net C)
+project(splendid_net VERSION 1.0.0 LANGUAGES C)
 
 # =======================================================
 # 🌟 终极补丁：强制所有代码生成“位置无关代码” (-fPIC)
@@ -37,16 +37,26 @@ message(STATUS "========== 🚀 XNET TARGET ENV: ${XNET_ENV} ==========")
 if(XNET_ENV STREQUAL "windows")
     # --- Windows Npcap 配置 ---
     add_compile_definitions(ENV_WIN_PCAP)
-    set(NPCAP_SDK_DIR "C:/Users/efair/Downloads/npcap-sdk-1.15")
 
-    add_library(Npcap::SDK UNKNOWN IMPORTED)
-    set_target_properties(Npcap::SDK PROPERTIES
-            INTERFACE_INCLUDE_DIRECTORIES "${NPCAP_SDK_DIR}/Include"
-            IMPORTED_LOCATION "${NPCAP_SDK_DIR}/Lib/x64/wpcap.lib"
-            INTERFACE_LINK_LIBRARIES "${NPCAP_SDK_DIR}/Lib/x64/Packet.lib;Ws2_32"
-    )
+    # Npcap SDK 路径搜索
+    set(NPCAP_SDK_DEFAULT "C:/Users/efair/Downloads/npcap-sdk-1.15")
+    if(EXISTS "${NPCAP_SDK_DEFAULT}/Include/pcap.h")
+        set(NPCAP_SDK_DIR "${NPCAP_SDK_DEFAULT}")
+    else()
+        find_path(NPCAP_SDK_DIR "pcap.h" PATHS "$ENV{NPCAP_SDK_DIR}" "C:/npcap-sdk" "${NPCAP_SDK_DEFAULT}")
+    endif()
 
-    set(DRIVER_TARGET Npcap::SDK)
+    if(NPCAP_SDK_DIR)
+        add_library(Npcap::SDK UNKNOWN IMPORTED)
+        set_target_properties(Npcap::SDK PROPERTIES
+                INTERFACE_INCLUDE_DIRECTORIES "${NPCAP_SDK_DIR}/Include"
+                IMPORTED_LOCATION "${NPCAP_SDK_DIR}/Lib/x64/wpcap.lib"
+                INTERFACE_LINK_LIBRARIES "${NPCAP_SDK_DIR}/Lib/x64/Packet.lib;Ws2_32"
+        )
+        set(DRIVER_TARGET Npcap::SDK)
+    else()
+        message(FATAL_ERROR "Npcap SDK not found. Set NPCAP_SDK_DIR or install at C:/Users/efair/Downloads/npcap-sdk-1.15")
+    endif()
     set(DRIVER_SUBDIR "src/drivers/pcap")
 
 elseif(XNET_ENV STREQUAL "ubuntu")

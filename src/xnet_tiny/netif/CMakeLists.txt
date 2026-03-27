@@ -14,6 +14,8 @@ elseif(XNET_ENV STREQUAL "ubuntu")
 elseif(XNET_ENV STREQUAL "debian")
     list(APPEND PORT_SRCS netif_tap.c)
     set(DRIVER_LIB driver_tap)
+else()
+    message(FATAL_ERROR "Unknown XNET_ENV: ${XNET_ENV}. Supported: windows, ubuntu, debian")
 endif()
 
 # 1. 编译为静态库
