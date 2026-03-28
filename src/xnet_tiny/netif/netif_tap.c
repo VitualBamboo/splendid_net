@@ -23,7 +23,7 @@ xnet_status_t xnet_netif_send(xnet_packet_t* packet) {
     return XNET_ERR_IO;
 }
 
-xnet_status_t xnet_netif_read(xnet_packet_t** packet) {
+xnet_status_t xnet_netif_read(xnet_packet_t** packet_ptr) {
     static uint8_t rx_buffer[1514];
 
     int len = tap_device_read(rx_buffer, sizeof(rx_buffer));
@@ -33,7 +33,7 @@ xnet_status_t xnet_netif_read(xnet_packet_t** packet) {
         memcpy(r_packet->data, rx_buffer, len);
         r_packet->len = len;
 
-        *packet = r_packet;
+        *packet_ptr = r_packet;
         return XNET_OK;
     }
 

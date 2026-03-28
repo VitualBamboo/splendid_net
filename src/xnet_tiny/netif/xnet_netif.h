@@ -46,13 +46,13 @@ xnet_status_t xnet_netif_send(xnet_packet_t *packet);
  *
  * 尝试从网卡接收一个数据包。该函数通常在主循环中被反复调用。
  *
- * @param packet [OUT] 二级指针，用于返回接收到的数据包。
+ * @param pp_packet [OUT] 二级指针，用于返回接收到的数据包。
  * 如果在 Pcap/DPDK 中收到了数据，驱动层需要调用 xnet_alloc_rx_packet
  * 分配内存，并将数据拷贝进去，最后让 *packet 指向它。
  * @return xnet_status_t
  * - XNET_OK: 成功读取到一个数据包
  * - XNET_ERR_IO: 当前没有数据包 (这不是错误，只是表示没收到数据)
  */
-xnet_status_t xnet_netif_read(xnet_packet_t **packet);
+xnet_status_t xnet_netif_read(xnet_packet_t **pp_packet);
 
 #endif // XNET_DRIVER_H

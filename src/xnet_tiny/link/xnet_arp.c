@@ -39,6 +39,9 @@ typedef struct _xarp_entry_t {
 static xarp_entry_t arp_table[XARP_CFG_TABLE_SIZE];         // ARP表
 static xnet_time_t arp_last_time;                           // ARP定时器，记录上一次扫描的时间
 
+
+static const uint8_t ether_broadcast_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}; // 以太网广播mac地址
+
 /**
  * 内部查找函数：根据目标 IP 地址在 ARP 表中寻找对应的表项
  * @param ipaddr 查找的ip地址
@@ -175,4 +178,100 @@ xnet_status_t xarp_resolve(const xip_addr_t *ipaddr, uint8_t **mac_addr) {
     xarp_make_request(ipaddr);
 
     return XNET_ERR_NONE;
+}
+
+/**
+ * 生成一个ARP响应
+ * @param target_ip
+ * @param target_mac
+ * @param arp_in_packet 接收到的ARP请求包
+ * @return 生成结果
+ */
+xnet_status_t xarp_make_response(uint8_t *target_ip, uint8_t *target_mac) {
+    xarp_packet_t *arp_packet;
+    xnet_packet_t *packet = xnet_alloc_tx_packet(sizeof(xarp_packet_t));
+
+    arp_packet = (xarp_packet_t*) packet->data;
+    arp_packet->hardware_type = swap_order16(XARP_HW_ETHER);
+    arp_packet->protocol_type = swap_order16(XNET_PROTOCOL_IP);
+    arp_packet->hardware_len = XNET_MAC_ADDR_SIZE;
+    arp_packet->protocol_len = XNET_IPV4_ADDR_SIZE;
+    arp_packet->opcode = swap_order16(XARP_REPLY);
+    memcpy(arp_packet->sender_mac, xnet_local_mac, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->sender_ip, xnet_local_ip.addr, XNET_IPV4_ADDR_SIZE);
+    memcpy(arp_packet->target_mac, target_mac, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->target_ip, target_ip, XNET_IPV4_ADDR_SIZE);
+    // 发送ARP响应，单播
+    return ethernet_out_to(XNET_PROTOCOL_ARP, target_mac, packet);
+}
+
+/**
+ * 构造一个ARP数据包，并通过以太网广播
+ * @param target_ipaddr 传入目标IP，或者传自己的IP
+ * @return 请求结果
+ */
+xnet_status_t xarp_make_request(const xip_addr_t *target_ipaddr) {
+    // 准备一个发送包
+    xarp_packet_t *arp_packet;
+    xnet_packet_t *xnet_packet = xnet_alloc_tx_packet(sizeof(xarp_packet_t));
+
+    // 让 arp_packet 指向 data 首地址，配置载荷
+    arp_packet = (xarp_packet_t*) xnet_packet->data;
+    arp_packet->hardware_type = swap_order16(XARP_HW_ETHER);
+    arp_packet->protocol_type = swap_order16(XNET_PROTOCOL_IP);
+    arp_packet->hardware_len = XNET_MAC_ADDR_SIZE;
+    arp_packet->protocol_len = XNET_IPV4_ADDR_SIZE;
+    arp_packet->opcode = swap_order16(XARP_REQUEST);
+    memcpy(arp_packet->sender_mac, xnet_local_mac, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->sender_ip, xnet_local_ip.addr, XNET_IPV4_ADDR_SIZE);
+    memset(arp_packet->target_mac, 0, XNET_MAC_ADDR_SIZE);
+    memcpy(arp_packet->target_ip, target_ipaddr->addr, XNET_IPV4_ADDR_SIZE);
+    // 发送ARP请求，多播
+    return ethernet_out_to(XNET_PROTOCOL_ARP, ether_broadcast_mac, xnet_packet);
+}
+
+/**
+ * ARP输入处理
+ * @param packet 输入的ARP包
+ */
+void xarp_in(xnet_packet_t *packet) {
+    // 如果小于，说明数据错误，直接忽略这个arp请求
+    if (packet->len < sizeof(xarp_packet_t)) return;
+
+    // 包的合法性检查
+    xarp_packet_t *arp_packet = (xarp_packet_t*) packet->data;
+    uint16_t opcode = swap_order16(arp_packet->opcode);
+    if ((swap_order16(arp_packet->hardware_type) != XARP_HW_ETHER) ||
+        (arp_packet->hardware_len != XNET_MAC_ADDR_SIZE) ||
+        (swap_order16(arp_packet->protocol_type) != XNET_PROTOCOL_IP) ||
+        (arp_packet->protocol_len != XNET_IPV4_ADDR_SIZE)
+        || ((opcode != XARP_REQUEST) && (opcode != XARP_REPLY))) {
+        return;
+        }
+
+    // 处理无偿ARP
+    if (xip_addr_eq(arp_packet->sender_ip, arp_packet->target_ip)) {
+        update_arp_entry(arp_packet->sender_ip, arp_packet->sender_mac);
+        return;
+    }
+
+    // 只处理发给自己的ARP
+    if (!xip_addr_eq(xnet_local_ip.addr, arp_packet->target_ip)) {
+        return;
+    }
+
+
+    // 根据操作码进行不同的处理
+    switch (swap_order16(arp_packet->opcode)) {
+        case XARP_REQUEST: // 收到请求，回送响应
+            // 在对方机器Ping 自己，然后看wireshark，能看到ARP请求和响应
+            // 接下来，很可能对方要与自己通信，所以更新一下
+            update_arp_entry(arp_packet->sender_ip, arp_packet->sender_mac);
+            xarp_make_response(arp_packet->sender_ip, arp_packet->sender_mac);
+            break;
+        case XARP_REPLY: // 收到响应，更新自己的表
+            update_arp_entry(arp_packet->sender_ip, arp_packet->sender_mac);
+            break;
+    }
+
 }

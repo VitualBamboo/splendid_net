@@ -10,7 +10,7 @@
 #include "xnet_netif.h"
 #include "xnet_config.h"
 
-static pcap_t* pcap;
+static pcap_t *pcap;
 
 /**
  * 协议栈虚拟 mac
@@ -22,7 +22,7 @@ const char default_mac_addr[] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC};
  * 初始化网络驱动
  * @return 0成功，其它失败
  */
-xnet_status_t xnet_netif_open(uint8_t* mac_addr) {
+xnet_status_t xnet_netif_open(uint8_t *mac_addr) {
     printf(">> [System Info] Initializing Driver: Windows Pcap\n");
     memcpy(mac_addr, default_mac_addr, sizeof(default_mac_addr));
 
@@ -38,7 +38,7 @@ xnet_status_t xnet_netif_open(uint8_t* mac_addr) {
     printf(">> [Driver] Passing IP to PCAP locator: %s\n", target_ip_str);
 
     pcap = pcap_device_open(target_ip_str, mac_addr, 1);
-    if (pcap == (pcap_t*) 0) {
+    if (pcap == NULL) {
         printf(">> [Driver Error] Failed to open network device.\n");
         exit(-1);
     }
@@ -51,7 +51,7 @@ xnet_status_t xnet_netif_open(uint8_t* mac_addr) {
  * @param size 数据长度
  * @return 0 - 成功，其它失败
  */
-xnet_status_t xnet_netif_send(xnet_packet_t* packet) {
+xnet_status_t xnet_netif_send(xnet_packet_t *packet) {
     return pcap_device_send(pcap, packet->data, packet->len);
 }
 
@@ -61,14 +61,14 @@ xnet_status_t xnet_netif_send(xnet_packet_t* packet) {
  * @param size 数据长度
  * @return 0 - 成功，其它失败
  */
-xnet_status_t xnet_netif_read(xnet_packet_t** packet) {
+xnet_status_t xnet_netif_read(xnet_packet_t **pp_packet) {
     uint16_t size;
-    xnet_packet_t* r_packet = xnet_alloc_rx_packet(XNET_CFG_PACKET_MAX_SIZE);
+    xnet_packet_t *rx_packet = xnet_alloc_rx_packet(XNET_CFG_PACKET_MAX_SIZE);
 
-    size = pcap_device_read(pcap, r_packet->data, XNET_CFG_PACKET_MAX_SIZE);
+    size = pcap_device_read(pcap, rx_packet->data, XNET_CFG_PACKET_MAX_SIZE);
     if (size) {
-        r_packet->len = size;
-        *packet = r_packet;
+        rx_packet->len = size;
+        *pp_packet = rx_packet;
         return XNET_OK;
     }
 

@@ -29,13 +29,6 @@
 // IP 地址比较工具
 #define xip_addr_eq(a, b)  (memcmp((a), (b), XNET_IPV4_ADDR_SIZE) == 0)
 
-// 默认 IP 配置
-#ifdef _WIN32
-    #define XNET_CFG_DEFAULT_IP  {192, 168, 254, 2}
-#else
-    #define XNET_CFG_DEFAULT_IP  {192, 168, 56, 200}
-#endif
-
 // 2. 核心枚举与类型
 
 // 错误码枚举
@@ -66,10 +59,9 @@ typedef struct _xip_addr_t {
     uint8_t addr[XNET_IPV4_ADDR_SIZE]; // 以字节形式存储的ip
 } xip_addr_t;
 
-// 3. 核心数据包结构 (最重要的结构体)
-// 网络数据包，大端，所见即所得
+// 网络数据包
 typedef struct _xnet_packet_t {
-    uint16_t len;                                // 包中有效数据大小
+    uint16_t len;                                   // 包中有效数据大小
     uint8_t *data;                                  // 包的数据起始地址 (动态变动)
     uint8_t buffer[XNET_CFG_PACKET_MAX_SIZE];       // 物理缓冲区
 } xnet_packet_t;
