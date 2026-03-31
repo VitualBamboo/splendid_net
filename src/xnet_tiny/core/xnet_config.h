@@ -2,9 +2,9 @@
 #ifndef XNET_CONFIG_H
 #define XNET_CONFIG_H
 
-#define XARP_DEBUG_MODE                     1               // 是否开启ARP调试模式
+#define XNET_CFG_ARP_DEBUG                  1               // 是否开启ARP调试模式
 
-#if XARP_DEBUG_MODE
+#if XNET_CFG_ARP_DEBUG
     // --- 调试模式 ---
     #define XARP_CFG_ENTRY_OK_TMO           10              // ARP表项存活 10秒
     #define XARP_CFG_ENTRY_RESOLVING_TMO    3               // 等待回复 3秒
@@ -18,6 +18,7 @@
 #define XARP_CFG_TIMER_PERIOD               1               // 扫描周期 1秒
 #define XARP_CFG_MAX_RETRIES                3               // 重试 3次
 #define XARP_CFG_TABLE_SIZE                 10              // 表容量
+#define XNET_CFG_IP_TTL                     64              // 缺省的IP包TTL值
 
 // ==========================================
 // 1. 静态 IP 总开关 (1: 启用静态 IP, 0: 启用 DHCP)

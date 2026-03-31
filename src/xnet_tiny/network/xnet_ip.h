@@ -8,7 +8,6 @@
 #include "xnet_tiny.h"
 
 #define XNET_VERSION_IPV4                   4   // IPV4
-#define XNET_IP_DEFAULT_TTL                 64  // 缺省的IP包TTL值
 
 // 提取版本号 (取高 4 位)
 #define XIP_VERSION(hdr)        (((hdr)->version_ihl >> 4) & 0x0F)

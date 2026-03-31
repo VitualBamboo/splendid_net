@@ -10,6 +10,7 @@
 #include "xnet_icmp.h"
 #include "xnet_tcp.h"
 #include "xnet_udp.h"
+#include "xnet_config.h"
 
 // 引入网卡配置变量
 extern xip_addr_t xnet_netmask;
@@ -97,7 +98,6 @@ void xip_in(xnet_packet_t *packet) {
     // 校验和要求检查
     uint16_t pre_checksum = ip_hdr->hdr_checksum; //取出原校验和
     ip_hdr->hdr_checksum = 0; //校验和本身也会参与运算，先归零
-    extern int hw_csum_offload;
     if (!hw_csum_offload) {
         if (pre_checksum != checksum16((uint16_t*)ip_hdr, ip_hdr_len, 0, 1)) {
             return; // 丢弃
@@ -195,7 +195,7 @@ xnet_status_t xip_out(xnet_protocol_t protocol, xip_addr_t *dest_ip, xnet_packet
     ip_hdr->total_len = swap_order16(packet->len);
     ip_hdr->id = swap_order16(ip_packet_id);
     ip_hdr->flags_fragment = 0; //不支持，填0
-    ip_hdr->ttl = XNET_IP_DEFAULT_TTL;
+    ip_hdr->ttl = XNET_CFG_IP_TTL;
     ip_hdr->protocol = protocol;
     memcpy(ip_hdr->dest_ip, dest_ip->addr, XNET_IPV4_ADDR_SIZE);
     memcpy(ip_hdr->src_ip, xnet_local_ip.addr, XNET_IPV4_ADDR_SIZE);
