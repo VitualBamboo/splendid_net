@@ -7,6 +7,20 @@
 #include "xnet_ip.h"
 #include <string.h>
 
+#define XICMP_TYPE_ECHO_REQUEST     8           // ICMP请求码值
+#define XICMP_TYPE_ECHO_REPLY       0           // ICMP响应码值
+
+#pragma pack(1)
+typedef struct _xicmp_hdr_t {
+    uint8_t type;       // 类型：8=Request, 0=Reply
+    uint8_t code;       // 代码：0
+    uint16_t checksum;  // 校验和
+    uint16_t id;        // 标识符，一般是cmd窗口的进程id
+    uint16_t seq;       // 序列号，1,2,3,4
+    // 后面紧接着就是 Data，用指针访问即可
+} xicmp_hdr_t;
+#pragma pack()
+
 void xicmp_init(void) {
 
 }
@@ -24,7 +38,7 @@ static xnet_status_t reply_icmp_request(xicmp_hdr_t *icmp_hdr, xip_addr_t *src_i
 
     // 构建ICMP回复包头
     xicmp_hdr_t *reply_hdr = (xicmp_hdr_t*)reply_packet->data;
-    reply_hdr->type = XICMP_CODE_ECHO_REPLY;
+    reply_hdr->type = XICMP_TYPE_ECHO_REPLY;
     reply_hdr->code = 0;
     reply_hdr->id = icmp_hdr->id;
     reply_hdr->seq = icmp_hdr->seq;
@@ -46,7 +60,7 @@ static xnet_status_t reply_icmp_request(xicmp_hdr_t *icmp_hdr, xip_addr_t *src_i
 void xicmp_in(xip_addr_t *src_ip, xnet_packet_t *packet) {
     xicmp_hdr_t *icmp_hdr = (xicmp_hdr_t *)packet->data;
 
-    if (packet->len >= sizeof(xicmp_hdr_t) && (icmp_hdr->type == XICMP_CODE_ECHO_REQUEST)) {
+    if (packet->len >= sizeof(xicmp_hdr_t) && (icmp_hdr->type == XICMP_TYPE_ECHO_REQUEST)) {
         reply_icmp_request(icmp_hdr, src_ip, packet);
     }
 }
