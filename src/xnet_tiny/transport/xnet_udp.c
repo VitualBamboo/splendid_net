@@ -43,21 +43,18 @@ void xudp_init(void) {
     memset(udp_pcb_pool, 0, sizeof(udp_pcb_pool));
 }
 
-void xudp_in(xnet_packet_t *packet, xip_addr_t *src_ip, xip_addr_t *dest_ip, xip_hdr_t *ip_hdr)
+void xudp_in(xnet_packet_t *packet, xip_addr_t *src_ip, xip_addr_t *dest_ip, xip_hdr_t *orig_ip_hdr)
 {
+    // 1. 包长度校验
     xudp_hdr_t *udp_hdr = (xudp_hdr_t*) packet->data;
-    uint16_t pre_checksum;
-    uint16_t src_port;
-
-    // 1. 长度校验
     if ((packet->len < sizeof(xudp_hdr_t)) || (packet->len < swap_order16(udp_hdr->total_len))) {
         return; // 长度校验失败，丢弃数据包
     }
 
-    // 2. 校验和
-    pre_checksum = udp_hdr->checksum;
+    // 2. 伪校验和（UDP）
+    uint16_t pre_checksum = udp_hdr->checksum;
     udp_hdr->checksum = 0;
-    // 3. UDP 校验和 可选，只有不为 0 时才需要验证
+    // 只有不为 0 时才需要验证
     if (pre_checksum != 0) {
         // 使用伪头部 (Pseudo-Header) 机制计算校验和，参数包括源IP、本地IP、协议类型、数据指针和长度
         uint16_t checksum = checksum_peso(src_ip, dest_ip, XNET_PROTOCOL_UDP,
@@ -74,28 +71,25 @@ void xudp_in(xnet_packet_t *packet, xip_addr_t *src_ip, xip_addr_t *dest_ip, xip
         }
     }
 
-    // 💡 新增逻辑：UDP 层自己负责找 pcb
+    // 3. 寻找匹配的PCB
     uint16_t dest_port = swap_order16(udp_hdr->dest_port);
-    xudp_pcb_t *udp_pcb = xudp_find_pcb(dest_port);
+    xudp_pcb_t *pcb = xudp_find_pcb(dest_port);
 
-    if (udp_pcb == NULL) {
-        // 🚀 终极联动：呼叫 ICMP 发送端口不可达！
-        xicmp_dest_unreach(XICMP_CODE_PORT_UNREACH, ip_hdr);
-        // 如果找不到对应的端口，说明没人监听这个端口，暂时先丢弃数据包
+    if (pcb == NULL) {
+        // 找不到匹配的 PCB，呼叫 ICMP 发送端口不可达
+        xicmp_dest_unreach(XICMP_CODE_PORT_UNREACH, orig_ip_hdr);
+        // 丢弃数据包
         return;
     }
 
-    // 4. 处理数据包
-    // 将源端口号从网络字节序转换为主机字节序
-    src_port = swap_order16(udp_hdr->src_port);
-
-    // 移除 UDP 头部，数据包指针 (packet->data) 现在指向 UDP 有效载荷 (Payload)
-    remove_header(packet, sizeof(xudp_hdr_t));
-
-    // 检查 pcb 是否有注册的处理函数 (handler)
-    if (udp_pcb->handler) {
+    // 4. 调用handler
+    if (pcb->handler) {
+        // 将源端口号从网络字节序转换为主机字节序
+        uint16_t src_port = swap_order16(udp_hdr->src_port);
+        // 移除 UDP 头部，数据包指针 (packet->data) 现在指向 UDP 有效载荷 (Payload)
+        remove_header(packet, sizeof(xudp_hdr_t));
         // 调用注册的处理函数，将数据包转发给上层应用
-        udp_pcb->handler(udp_pcb, src_ip, src_port, packet);
+        pcb->handler(pcb, src_ip, src_port, packet);
     }
 }
 
