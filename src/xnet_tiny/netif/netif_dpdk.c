@@ -36,13 +36,13 @@ xnet_status_t xnet_netif_read(xnet_packet_t** packet) {
 
     if (len > 0) {
         // 2. 如果读到了，向协议栈申请内存
-        xnet_packet_t* r_packet = xnet_alloc_rx_packet(len);
+        xnet_packet_t* rx_packet = xnet_prepare_rx_packet(len);
 
         // 3. 填充数据
-        memcpy(r_packet->data, rx_buffer, len);
-        r_packet->len = len;
+        memcpy(rx_packet->data, rx_buffer, len);
+        rx_packet->len = len;
 
-        *packet = r_packet;
+        *packet = rx_packet;
         return XNET_OK;
     }
 

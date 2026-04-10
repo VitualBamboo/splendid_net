@@ -204,7 +204,7 @@ void xnet_dhcp_init(void) {
         if (dhcp_pcb) {
             xudp_bind_pcb(dhcp_pcb, 68);
         } else {
-            printf(">> [DHCP] Panic: Failed to alloc UDP socket!\n");
+            printf(">> [DHCP] Panic: Failed to new UDP socket!\n");
         }
     }
 

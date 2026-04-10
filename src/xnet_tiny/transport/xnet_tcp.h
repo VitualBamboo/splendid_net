@@ -7,8 +7,15 @@
 
 #include "xnet_def.h"
 
-// 1. 前置声明
-typedef struct _xtcp_buf_t xtcp_buf_t;
+#define XTCP_CFG_RTX_BUF_SIZE 2048
+
+// 1. 完整定义缓冲区结构体
+typedef struct _xtcp_buf_t {
+    uint16_t write_idx;                     // 写入位置
+    uint16_t ack_idx;                       // 确认位置
+    uint16_t send_idx;                      // 发送位置
+    uint8_t  data[XTCP_CFG_RTX_BUF_SIZE];   // 缓冲区实体
+} xtcp_buf_t;
 
 // 2. TCP 生命周期状态机 (RFC 793 标准状态)
 typedef enum _xtcp_state_e {
@@ -56,8 +63,8 @@ struct _xtcp_pcb_t {
 
     // ===== 数据与应用层接口 =====
     xtcp_event_handler_t   event_cb;        // 应用层事件回调函数
-    xtcp_buf_t            *tx_buf;          // 发送缓冲区指针
-    xtcp_buf_t            *rx_buf;          // 接收缓冲区指针
+    xtcp_buf_t             tx_buf;          // 发送缓冲区
+    xtcp_buf_t             rx_buf;          // 接收缓冲区
 
     // ===== 监听与全连接队列 (LwIP-like backlog support) =====
     xtcp_pcb_t            *listener;        // 指向父级监听 PCB 的指针
