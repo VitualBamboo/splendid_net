@@ -33,13 +33,13 @@
 
 // ===== _hdrlen_rsvd_flags =====
 // 提取高 4 位: 头部长度 (Data Offset)
-#define TCP_HDR_GET_LEN(hdrlen_rsvd_flags)     (((hdrlen_rsvd_flags) >> 12) & 0x000F)
+#define TCP_HDR_GET_LEN(_hdrlen_rsvd_flags)     (((_hdrlen_rsvd_flags) >> 12) & 0x000F)
 
 // 提取低 6 位: 标志位 (Flags)
-#define TCP_HDR_GET_FLAGS(hdrlen_rsvd_flags)   ((hdrlen_rsvd_flags) & 0x003F)
+#define TCP_HDR_GET_FLAGS(_hdrlen_rsvd_flags)   ((_hdrlen_rsvd_flags) & 0x003F)
 
 // 组装 16 bit: 长度 + 保留位(默认0) + 标志位
-#define TCP_HDR_SET_FLAGS(len, flags)          ((((len) & 0x000F) << 12) | ((flags) & 0x003F))
+#define TCP_HDR_SET_FLAGS(hdr_len, flags)          ((((hdr_len) & 0x000F) << 12) | ((flags) & 0x003F))
 
 // pcb数组，程序启动自动创建，属性全部为0
 static xtcp_pcb_t tcp_pcb_pool[XTCP_PCB_MAX_NUM];
@@ -226,6 +226,7 @@ static uint16_t tcp_buf_pull(xtcp_buf_t *tcp_buf, uint8_t *dest, uint16_t len) {
 }
 
 static xnet_status_t tcp_send_reset(uint32_t remote_ack, uint16_t local_port, xip_addr_t *remote_ip, uint16_t remote_port) {
+    // TCP发送复位，只有头部，没有选项
     xnet_packet_t *packet = xnet_prepare_tx_packet(sizeof(xtcp_hdr_t));
     xtcp_hdr_t *tcp_hdr = (xtcp_hdr_t*) packet->data;
 
@@ -233,9 +234,9 @@ static xnet_status_t tcp_send_reset(uint32_t remote_ack, uint16_t local_port, xi
     tcp_hdr->dest_port = swap_order16(remote_port);
     tcp_hdr->seq = 0;
     tcp_hdr->ack = swap_order32(remote_ack);
-    uint16_t len_val = sizeof(xtcp_hdr_t) / 4;
+    uint16_t hdr_len = sizeof(xtcp_hdr_t) / 4;
     uint16_t flags = XTCP_FLAG_RST | XTCP_FLAG_ACK;
-    tcp_hdr->_hdrlen_rsvd_flags = swap_order16(TCP_HDR_SET_FLAGS(len_val, flags));
+    tcp_hdr->_hdrlen_rsvd_flags = swap_order16(TCP_HDR_SET_FLAGS(hdr_len, flags));
     tcp_hdr->window = 0;
     tcp_hdr->checksum = 0;
     tcp_hdr->urgent_ptr = 0;
@@ -378,7 +379,7 @@ void xtcp_in(xip_addr_t *remote_ip, xnet_packet_t *packet) {
     if (packet->len < sizeof(xtcp_hdr_t)) {
         return;
     }
-    // 校验校验和
+    // 校验伪校验和
     xtcp_hdr_t *tcp_hdr = (xtcp_hdr_t*) packet->data;
     uint16_t pre_checksum = tcp_hdr->checksum;
     tcp_hdr->checksum = 0;
