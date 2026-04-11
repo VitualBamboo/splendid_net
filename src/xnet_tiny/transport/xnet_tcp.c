@@ -31,29 +31,31 @@
 #define TCP_SEQ_LT(a, b)   ((int32_t)((a) - (b)) < 0)
 #define TCP_SEQ_LEQ(a, b)  ((int32_t)((a) - (b)) <= 0)
 
+// ===== _hdrlen_rsvd_flags =====
+// 提取高 4 位: 头部长度 (Data Offset)
+#define TCP_HDR_GET_LEN(hdrlen_rsvd_flags)     (((hdrlen_rsvd_flags) >> 12) & 0x000F)
+
+// 提取低 6 位: 标志位 (Flags)
+#define TCP_HDR_GET_FLAGS(hdrlen_rsvd_flags)   ((hdrlen_rsvd_flags) & 0x003F)
+
+// 组装 16 bit: 长度 + 保留位(默认0) + 标志位
+#define TCP_HDR_SET_FLAGS(len, flags)          ((((len) & 0x000F) << 12) | ((flags) & 0x003F))
+
 // pcb数组，程序启动自动创建，属性全部为0
 static xtcp_pcb_t tcp_pcb_pool[XTCP_PCB_MAX_NUM];
 
 #pragma pack(1)
 // TCP头部 20个字节（可能还有12字节的选项数据）
 typedef struct _xtcp_hdr_t {
-    uint16_t src_port;
-    uint16_t dest_port;
-    uint32_t seq;
-    uint32_t ack;
-    union {
-        uint16_t all;
-        struct {
-            uint16_t flags : 6;       // 低6位
-            uint16_t reserved : 6;    // 中间6位
-            uint16_t hdr_len : 4;     // 高4位 （乘以4）
-        };
-    }hdr_flags;
-
-    uint16_t window;
-    uint16_t checksum;
-    uint16_t urgent_ptr;
-}xtcp_hdr_t;
+    uint16_t src_port;           // 源端口号 (Source Port)
+    uint16_t dest_port;          // 目的端口号 (Destination Port)
+    uint32_t seq;                // 序列号 (Sequence Number)：标记本端发送的数据字节流序号
+    uint32_t ack;                // 确认号 (Acknowledgment Number)：期望收到对方下一个字节的序号
+    uint16_t _hdrlen_rsvd_flags; // 首部长度(高4位) + 保留位(中间6位) + 标志位FIN/SYN/RST等(低6位)
+    uint16_t window;             // 接收窗口 (Window Size)：告诉对方我还能接收多少字节，用于流量控制
+    uint16_t checksum;           // 校验和 (Checksum)：涵盖 IP 伪头部、TCP 头部及 payload 数据
+    uint16_t urgent_ptr;         // 紧急指针 (Urgent Pointer)：当标志位 URG=1 时有效，表示紧急数据的位置
+} xtcp_hdr_t;
 #pragma pack()
 
 // ===== accept queue helpers (listener-owned, lwIP-like) =====
@@ -231,10 +233,9 @@ static xnet_status_t tcp_send_reset(uint32_t remote_ack, uint16_t local_port, xi
     tcp_hdr->dest_port = swap_order16(remote_port);
     tcp_hdr->seq = 0;
     tcp_hdr->ack = swap_order32(remote_ack);
-    tcp_hdr->hdr_flags.all = 0;
-    tcp_hdr->hdr_flags.hdr_len = sizeof(xtcp_hdr_t) / 4;
-    tcp_hdr->hdr_flags.flags = XTCP_FLAG_RST | XTCP_FLAG_ACK;
-    tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
+    uint16_t len_val = sizeof(xtcp_hdr_t) / 4;
+    uint16_t flags = XTCP_FLAG_RST | XTCP_FLAG_ACK;
+    tcp_hdr->_hdrlen_rsvd_flags = swap_order16(TCP_HDR_SET_FLAGS(len_val, flags));
     tcp_hdr->window = 0;
     tcp_hdr->checksum = 0;
     tcp_hdr->urgent_ptr = 0;
@@ -245,8 +246,9 @@ static xnet_status_t tcp_send_reset(uint32_t remote_ack, uint16_t local_port, xi
 }
 
 static void tcp_read_mss(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr) {
+    uint16_t actual_hdr_len = TCP_HDR_GET_LEN(tcp_hdr->_hdrlen_rsvd_flags) * 4;
     // 真实长度 - 理论长度 = 选项长度
-    uint16_t opt_len = tcp_hdr->hdr_flags.hdr_len * 4 - sizeof(xtcp_hdr_t);
+    uint16_t opt_len = actual_hdr_len - sizeof(xtcp_hdr_t);
 
     if (opt_len == 0) {
         pcb->remote_mss = XTCP_MSS_DEFAULT;
@@ -262,6 +264,7 @@ static void tcp_read_mss(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr) {
         }
     }
 }
+
 // 通用发送数据方法
 static xnet_status_t tcp_send_segment(xtcp_pcb_t *pcb, uint8_t flags) {
     uint16_t payload_len = tcp_buf_wait_send_count(&pcb->tx_buf);
@@ -285,10 +288,8 @@ static xnet_status_t tcp_send_segment(xtcp_pcb_t *pcb, uint8_t flags) {
     tcp_hdr->dest_port = swap_order16(pcb->remote_port);
     tcp_hdr->seq = swap_order32(pcb->snd_nxt); //由上一次发送的seq确定
     tcp_hdr->ack = swap_order32(pcb->rcv_nxt); //由上一次收到的seq确定
-    tcp_hdr->hdr_flags.all = 0;
-    tcp_hdr->hdr_flags.hdr_len = (opt_len + sizeof(xtcp_hdr_t)) / 4;
-    tcp_hdr->hdr_flags.flags = flags;
-    tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
+    uint16_t len_val = (opt_len + sizeof(xtcp_hdr_t)) / 4;
+    tcp_hdr->_hdrlen_rsvd_flags = swap_order16(TCP_HDR_SET_FLAGS(len_val, flags));
     tcp_hdr->window = swap_order16(tcp_buf_free_count(&pcb->rx_buf));
     tcp_hdr->checksum = 0;
     tcp_hdr->urgent_ptr = 0;
@@ -330,10 +331,11 @@ static void tcp_pcb_free(xtcp_pcb_t *pcb) {
 
 // 监听状态下的输入处理（发送第二次握手）
 static void tcp_listen_input(xtcp_pcb_t *listen_pcb, xip_addr_t *remote_ip, xtcp_hdr_t *tcp_hdr) {
-    uint16_t hdr_flags = tcp_hdr->hdr_flags.all;
+    // 安全提取标志位
+    uint16_t flags = TCP_HDR_GET_FLAGS(tcp_hdr->_hdrlen_rsvd_flags);
 
     // 非 SYN 包直接 RST
-    if (!(hdr_flags & XTCP_FLAG_SYN)) {
+    if (!(flags & XTCP_FLAG_SYN)) {
         tcp_send_reset(tcp_hdr->seq, listen_pcb->local_port, remote_ip, tcp_hdr->src_port);
         return;
     }
@@ -391,7 +393,7 @@ void xtcp_in(xip_addr_t *remote_ip, xnet_packet_t *packet) {
     // 大小端转换
     tcp_hdr->src_port = swap_order16(tcp_hdr->src_port);
     tcp_hdr->dest_port = swap_order16(tcp_hdr->dest_port);
-    tcp_hdr->hdr_flags.all = swap_order16(tcp_hdr->hdr_flags.all);
+    tcp_hdr->_hdrlen_rsvd_flags = swap_order16(tcp_hdr->_hdrlen_rsvd_flags);
     tcp_hdr->seq = swap_order32(tcp_hdr->seq);
     tcp_hdr->ack = swap_order32(tcp_hdr->ack);
     tcp_hdr->window = swap_order16(tcp_hdr->window);
@@ -426,14 +428,17 @@ void xtcp_in(xip_addr_t *remote_ip, xnet_packet_t *packet) {
     }
 
     // 这里可能是第三次握手，也可能是连接已建立后的正常通信，此时tcp_hdr可能包含option数据，所以不能使用sizeof(xtcp_hdr_t)
-    uint16_t actual_hdr_len = tcp_hdr->hdr_flags.hdr_len * 4;
+    uint16_t actual_hdr_len = TCP_HDR_GET_LEN(tcp_hdr->_hdrlen_rsvd_flags) * 4;
     // 头部声称的长度不能小于基础 20 字节，也不能大于当前整个包的物理长度
     if (actual_hdr_len < sizeof(xtcp_hdr_t) || actual_hdr_len > packet->len) {
         return; // 非法畸形包，直接丢弃
     }
     remove_header(packet, actual_hdr_len);
-    uint16_t flags = tcp_hdr->hdr_flags.flags;
+
+    // 使用安全宏提取标志位
+    uint16_t flags = TCP_HDR_GET_FLAGS(tcp_hdr->_hdrlen_rsvd_flags);
     uint16_t payload_len = packet->len; // 剥离头后，这就是数据长度
+
     switch (pcb->state) {
         case XTCP_STATE_SYN_RECVD:
             if (flags & XTCP_FLAG_ACK) {
