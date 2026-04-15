@@ -63,7 +63,7 @@ struct _xtcp_pcb_t {
     xtcp_buf_t             rx_buf;          // 接收缓冲区
 
     // ===== 监听与全连接队列 (LwIP-like backlog support) =====
-    xtcp_pcb_t            *listener;        // 指向父级监听 PCB 的指针
+    xtcp_pcb_t            *lpcb;        // 指向父级监听 PCB 的指针
     xtcp_pcb_t            *accept_next;     // 链表指针：全连接队列中的下一个子连接
     xtcp_pcb_t            *accept_head;     // 全连接队列 (已完成三次握手) 头指针
     xtcp_pcb_t            *accept_tail;     // 全连接队列尾指针
@@ -85,6 +85,6 @@ xnet_status_t  xtcp_pcb_close(xtcp_pcb_t *pcb);
 // ===== 数据收发与连接提取 =====
 int            xtcp_send(xtcp_pcb_t *pcb, uint8_t *src, uint16_t len);
 int            xtcp_recv(xtcp_pcb_t *pcb, uint8_t *dest, uint16_t len);
-xtcp_pcb_t    *xtcp_accept(xtcp_pcb_t *listen_pcb);
+xtcp_pcb_t    *xtcp_accept(xtcp_pcb_t *lpcb);
 
 #endif //XNET_TCP_H

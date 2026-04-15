@@ -58,34 +58,34 @@ typedef struct _xtcp_hdr_t {
 } xtcp_hdr_t;
 #pragma pack()
 
-// ===== accept queue helpers (listener-owned, lwIP-like) =====
+// ===== accept queue helpers (lpcb, lwIP-like) =====
 
-static void tcp_acceptq_push(xtcp_pcb_t *listen, xtcp_pcb_t *child) {
-    child->accept_next = NULL;
+static void tcp_acceptq_push(xtcp_pcb_t *lpcb, xtcp_pcb_t *pcb) {
+    pcb->accept_next = NULL;
 
-    if (listen->accept_head == NULL) {
-        listen->accept_head = child;
-        listen->accept_tail = child;
+    if (lpcb->accept_head == NULL) {
+        lpcb->accept_head = pcb;
+        lpcb->accept_tail = pcb;
     } else {
-        listen->accept_tail->accept_next = child;
-        listen->accept_tail = child;
+        lpcb->accept_tail->accept_next = pcb;
+        lpcb->accept_tail = pcb;
     }
 
-    listen->accept_cnt++;
+    lpcb->accept_cnt++;
 }
 
-static xtcp_pcb_t *tcp_acceptq_pop(xtcp_pcb_t *listen) {
-    xtcp_pcb_t *child = listen->accept_head;
-    if (!child) return NULL;
+static xtcp_pcb_t *tcp_acceptq_pop(xtcp_pcb_t *lpcb) {
+    xtcp_pcb_t *pcb = lpcb->accept_head;
+    if (!pcb) return NULL;
 
-    listen->accept_head = child->accept_next;
-    if (listen->accept_head == NULL) {
-        listen->accept_tail = NULL;
+    lpcb->accept_head = pcb->accept_next;
+    if (lpcb->accept_head == NULL) {
+        lpcb->accept_tail = NULL;
     }
 
-    child->accept_next = NULL;
-    listen->accept_cnt--;
-    return child;
+    pcb->accept_next = NULL;
+    lpcb->accept_cnt--;
+    return pcb;
 }
 
 
@@ -331,38 +331,38 @@ static void tcp_pcb_free(xtcp_pcb_t *pcb) {
 }
 
 // 监听状态下的输入处理（发送第二次握手）
-static void tcp_listen_input(xtcp_pcb_t *listen_pcb, xip_addr_t *remote_ip, xtcp_hdr_t *tcp_hdr, uint16_t flags) {
+static void tcp_listen_input(xtcp_pcb_t *lpcb, xip_addr_t *remote_ip, xtcp_hdr_t *tcp_hdr, uint16_t flags) {
     // 非 SYN 包直接 RST
     if (!(flags & XTCP_FLAG_SYN)) {
-        tcp_send_reset(tcp_hdr->seq, listen_pcb->local_port, remote_ip, tcp_hdr->src_port);
+        tcp_send_reset(tcp_hdr->seq, lpcb->local_port, remote_ip, tcp_hdr->src_port);
         return;
     }
 
     // 1. 拿一个标准件 (此时缓冲区、随机Seq都准备好了！)
-    xtcp_pcb_t *child_pcb = xtcp_pcb_new();
-    if (!child_pcb) return;
+    xtcp_pcb_t *pcb = xtcp_pcb_new();
+    if (!pcb) return;
 
     // 2. 个性化配置 (连接侧特有)
     // 2.1 继承“父业”
-    child_pcb->local_port = listen_pcb->local_port; // 继承端口
-    child_pcb->listener = listen_pcb;               // 记录父 LISTEN pcb
+    pcb->local_port = lpcb->local_port;         // 继承端口
+    pcb->lpcb = lpcb;                           // 记录lpcb
 
     // 2.2 录入“客人”信息
-    child_pcb->state = XTCP_STATE_SYN_RECVD;        // 状态跃迁
-    child_pcb->remote_ip = *remote_ip;
-    child_pcb->remote_port = tcp_hdr->src_port;
-    child_pcb->remote_win = tcp_hdr->window;
+    pcb->state = XTCP_STATE_SYN_RECVD;          // 状态跃迁
+    pcb->remote_ip = *remote_ip;
+    pcb->remote_port = tcp_hdr->src_port;
+    pcb->remote_win = tcp_hdr->window;
 
     // 2.3 同步进度 (Seq)
-    child_pcb->rcv_nxt = tcp_hdr->seq + 1;
+    pcb->rcv_nxt = tcp_hdr->seq + 1;
 
     // 3. 协议协商 (MSS)
-    tcp_read_mss(child_pcb, tcp_hdr);
+    tcp_read_mss(pcb, tcp_hdr);
 
     // 4. 发送 SYN+ACK
-    xnet_status_t status = tcp_send_segment(child_pcb, XTCP_FLAG_SYN | XTCP_FLAG_ACK);
+    xnet_status_t status = tcp_send_segment(pcb, XTCP_FLAG_SYN | XTCP_FLAG_ACK);
     if (status < 0) {
-        tcp_pcb_free(child_pcb);
+        tcp_pcb_free(pcb);
     }
 }
 
@@ -397,11 +397,11 @@ static void tcp_process(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr, uint16_t flags, ui
                     pcb->snd_una++;  // 确认 SYN 已被对方确认
                     pcb->state = XTCP_STATE_ESTABLISHED;
 
-                    // 入队到父 listener 的 accept 队列（而不是全局队列）
-                    xtcp_pcb_t *listen = pcb->listener;
-                    if (listen && listen->state == XTCP_STATE_LISTEN) {
-                        if (listen->accept_cnt < listen->backlog) {
-                            tcp_acceptq_push(listen, pcb);
+                    // 入队到 lpcb 的 accept 队列（而不是全局队列）
+                    xtcp_pcb_t *lpcb = pcb->lpcb;
+                    if (lpcb && lpcb->state == XTCP_STATE_LISTEN) {
+                        if (lpcb->accept_cnt < lpcb->backlog) {
+                            tcp_acceptq_push(lpcb, pcb);
                         } else {
                             // backlog 满：直接拒绝（RST 或 close 都行，这里用 RST 更干脆）
                             tcp_send_reset(pcb->rcv_nxt, pcb->local_port, &pcb->remote_ip, pcb->remote_port);
@@ -601,7 +601,7 @@ xnet_status_t xtcp_pcb_bind(xtcp_pcb_t *pcb, uint16_t local_port) {
 // 接收到请求后，找到匹配的 pcb
 // 优先级：已建立连接的五元组匹配 > 监听端口匹配
 xtcp_pcb_t *xtcp_pcb_find(xip_addr_t *remote_ip, uint16_t remote_port, uint16_t local_port) {
-    xtcp_pcb_t *listen_pcb = NULL;
+    xtcp_pcb_t *lpcb = NULL;
 
     for (xtcp_pcb_t *curr = tcp_pcb_pool; curr < &tcp_pcb_pool[XTCP_PCB_MAX_NUM]; curr++) {
         // 0. FREE 的直接跳过
@@ -623,12 +623,12 @@ xtcp_pcb_t *xtcp_pcb_find(xip_addr_t *remote_ip, uint16_t remote_port, uint16_t 
 
         // 3. 检查 LISTEN 状态 (作为备选)
         if (curr->state == XTCP_STATE_LISTEN) {
-            listen_pcb = curr;
+            lpcb = curr;
         }
     }
 
     // 4. 如果没找到活动连接，返回监听 listen pcb（如果有的话）用来建立新连接
-    return listen_pcb;
+    return lpcb;
 }
 
 xnet_status_t xtcp_pcb_listen(xtcp_pcb_t *pcb, uint8_t backlog) {
@@ -701,9 +701,9 @@ xnet_status_t xtcp_pcb_close(xtcp_pcb_t *pcb) {
     return XNET_OK;
 }
 
-xtcp_pcb_t *xtcp_accept(xtcp_pcb_t *listen_pcb) {
-    if (!listen_pcb || listen_pcb->state != XTCP_STATE_LISTEN) {
+xtcp_pcb_t *xtcp_accept(xtcp_pcb_t *lpcb) {
+    if (!lpcb || lpcb->state != XTCP_STATE_LISTEN) {
         return NULL;
     }
-    return tcp_acceptq_pop(listen_pcb);
+    return tcp_acceptq_pop(lpcb);
 }
