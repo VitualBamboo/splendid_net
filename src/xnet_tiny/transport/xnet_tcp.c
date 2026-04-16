@@ -271,21 +271,51 @@ static xnet_status_t tcp_send_reset(uint32_t ack_seq, uint16_t local_port, xip_a
 
 static void tcp_parse_mss(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr) {
     uint16_t actual_hdr_len = TCP_HDR_GET_LEN(tcp_hdr->_hdrlen_rsvd_flags) * 4;
-    // 真实长度 - 理论长度 = 选项长度
     uint16_t opt_len = actual_hdr_len - sizeof(xtcp_hdr_t);
 
     if (opt_len == 0) {
         pcb->remote_mss = XTCP_MSS_DEFAULT;
-    } else {
-        uint8_t *opt_data = (uint8_t*)tcp_hdr + sizeof(xtcp_hdr_t);
-        uint8_t *opt_end = opt_data + opt_len;
+        return;
+    }
 
-        while ((*opt_data != XTCP_KIND_END) && (opt_data < opt_end)) {
-            if ((*opt_data++ == XTCP_KIND_MSS) && (*opt_data++ == 4)) {
-                pcb->remote_mss = swap_order16(*(uint16_t *)opt_data);
-                return;
-            }
+    uint8_t *opt_data = (uint8_t*)tcp_hdr + sizeof(xtcp_hdr_t);
+    uint8_t *opt_end = opt_data + opt_len;
+
+    // 严谨的边界保护循环
+    while (opt_data < opt_end) {
+        uint8_t kind = opt_data[0];
+
+        // 1. 处理单字节刺客：选项结束符
+        if (kind == XTCP_KIND_END) {
+            break;
         }
+
+        // 2. 处理单字节刺客：NOP 填充符
+        if (kind == 1) {
+            opt_data++; // 强行前移 1 字节
+            continue;
+        }
+
+        // 3. 处理常规 TLV 选项
+        // 防止恶意畸形包（Length 字段在边界外）
+        if (opt_data + 1 >= opt_end) break;
+
+        uint8_t len = opt_data[1];
+
+        // 防止恶意畸形包（Length 声明小于 2 会导致死循环）
+        if (len < 2) break;
+
+        // 狙击目标：找到了 MSS
+        if (kind == XTCP_KIND_MSS && len == 4) {
+            if (opt_data + 4 <= opt_end) {
+                // 提取偏移 2 字节后的 Value，并做大小端转换
+                pcb->remote_mss = swap_order16(*(uint16_t *)(opt_data + 2));
+            }
+            break; // 目的达到，安全撤退
+        }
+
+        // 核心跳跃逻辑：不关心的选项，直接按 Length 跨过去！
+        opt_data += len;
     }
 }
 
