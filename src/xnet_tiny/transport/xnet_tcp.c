@@ -246,7 +246,7 @@ static xnet_status_t tcp_send_reset(uint32_t ack_seq, uint16_t local_port, xip_a
     return xip_out(XNET_PROTOCOL_TCP, remote_ip, packet);
 }
 
-static void tcp_read_mss(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr) {
+static void tcp_parse_mss(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr) {
     uint16_t actual_hdr_len = TCP_HDR_GET_LEN(tcp_hdr->_hdrlen_rsvd_flags) * 4;
     // 真实长度 - 理论长度 = 选项长度
     uint16_t opt_len = actual_hdr_len - sizeof(xtcp_hdr_t);
@@ -353,11 +353,11 @@ static void tcp_listen_input(xtcp_pcb_t *lpcb, xip_addr_t *remote_ip, xtcp_hdr_t
     pcb->remote_port = tcp_hdr->src_port;
     pcb->remote_win = tcp_hdr->window;
 
-    // 2.3 同步进度 (Seq)
+    // 2.3 同步进度 (此时已经收到第一次握手)
     pcb->rcv_nxt = tcp_hdr->seq + 1;
 
     // 3. 协议协商 (MSS)
-    tcp_read_mss(pcb, tcp_hdr);
+    tcp_parse_mss(pcb, tcp_hdr);
 
     // 4. 发送 SYN+ACK
     xnet_status_t status = tcp_send_segment(pcb, XTCP_FLAG_SYN | XTCP_FLAG_ACK);
