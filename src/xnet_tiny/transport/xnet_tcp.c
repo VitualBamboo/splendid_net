@@ -259,7 +259,7 @@ static xnet_status_t tcp_send_reset(uint32_t ack_seq, uint16_t local_port, xip_a
     if (!packet) return XNET_ERR_MEM; // 别忘了查空！
 
     xtcp_hdr_t *tcp_hdr = (xtcp_hdr_t*) packet->data;
-    
+
     // 注意：RST 包的 SEQ 填 0，窗口填 0，不带选项
     tcp_build_header_raw(tcp_hdr, local_port, remote_port, 0, ack_seq, 0, XTCP_FLAG_RST | XTCP_FLAG_ACK, 0);
 
@@ -465,51 +465,40 @@ static void tcp_process(xtcp_pcb_t *pcb, xtcp_hdr_t *tcp_hdr, uint16_t flags, ui
                 }
             }
             break;
-        case XTCP_STATE_ESTABLISHED: //连接已建立，大部分情况都会走这里
-            if ((flags & XTCP_FLAG_ACK)) {
-                // 实时更新对方的接收窗口。
-                // 即使 ACK 号没有变（即没有确认新数据），对方也可能只是发个包来告诉我们窗口变大了。
+        case XTCP_STATE_ESTABLISHED:
+            // 第一阶段：处理输入 (Input Processing) - 消化对方发来的包
+            // 1. 处理对方的确认号 (ACK) -> 释放本地发送缓冲区
+            if (flags & XTCP_FLAG_ACK) {
                 pcb->remote_win = tcp_hdr->window;
                 if (TCP_SEQ_LT(pcb->snd_una, tcp_hdr->ack) && TCP_SEQ_LEQ(tcp_hdr->ack, pcb->snd_nxt)) {
-                    // 计算对方确认了多少字节
                     uint32_t acked_len = tcp_hdr->ack - pcb->snd_una;
-
-                    // 释放发送缓冲区空间 (这一步把 tail 指针前移了)
                     tcp_buf_advance_ack(&pcb->tx_buf, acked_len);
                     pcb->snd_una += acked_len;
                 }
             }
 
-            // 定义一个标志位：是否需要回复 ACK
-            int need_ack = 0;
+            int need_ack = 0; // 是否必须回复确认的标志
 
-            // 显式处理接收到的数据
+            // 2. 处理对方的数据 (Payload) -> 写入本地接收缓冲区
             if (payload_len > 0) {
-                // 1. 直接调用 buffer 的 put 方法 (语义清晰：放入接收缓冲)
-                int written = tcp_buf_put(&pcb->rx_buf, payload, payload_len); // [!] 这里替换成了 payload
-
-                // 2. 更新接收进度 (只加数据的长度)
+                int written = tcp_buf_put(&pcb->rx_buf, payload, payload_len);
                 pcb->rcv_nxt += written;
-
-                // 收到了新数据，必须回复 ACK
-                need_ack = 1;
+                need_ack = 1; // 收到新数据，必须回复 ACK 告诉对方
             }
 
-            // 作为服务端，收到第一次挥手FIN
-            if ((flags & XTCP_FLAG_FIN)) {
-                pcb->state = XTCP_STATE_CLOSE_WAIT; // 注意：服务端收到FIN通常进入CLOSE_WAIT
-                pcb->rcv_nxt++; // FIN 占用一个序列号
-                // 收到 FIN，必须回复 ACK
-                need_ack = 1;
+            // 3. 处理对方的断开请求 (FIN) -> 状态跃迁
+            if (flags & XTCP_FLAG_FIN) {
+                pcb->state = XTCP_STATE_CLOSE_WAIT;
+                pcb->rcv_nxt++;
+                need_ack = 1; // 收到 FIN，必须回复 ACK 确认断开
             }
-            // 4. 统一发送 ACK / 数据
-            if (need_ack) {
-                // 必须回 ACK (可能带有 FIN 的 ACK，或者数据的 ACK)
-                // 如果刚好自己也有数据要发，tcp_send_segment 会自动带上 payload (捎带应答)
-                tcp_send_segment(pcb, XTCP_FLAG_ACK);
-            }else if (tcp_buf_wait_send_count(&pcb->tx_buf)) {
-                // 虽然没收到新数据不需要立即 ACK，但我自己有数据要发
-                // 这种情况下也要发包 (ACK 标志也是必须带的)
+
+            // 第二阶段：处理输出 (Output Triggering) - 决定是否要发包
+            // 发包触发条件：
+            // 条件 A：刚刚收到了新数据或 FIN，协议要求必须强制回 ACK (need_ack == 1)
+            // 条件 B：本地业务层刚好有数据在排队等待发送
+            // 只要满足其一，我们就调用发送函数 (带数据的包天然包含 ACK，所以统一调用即可)
+            if (need_ack || tcp_buf_wait_send_count(&pcb->tx_buf) > 0) {
                 tcp_send_segment(pcb, XTCP_FLAG_ACK);
             }
             break;
